@@ -274,15 +274,19 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
       }
     }
 
-    // turn and explain — narration carries the prose; board is already written
-    push({
-      phase: "highlight",
-      label: shorten(block.label, 28),
-      say: `${phrase.explain} ${block.body}`,
-      teacher: "explain",
-      moveTo: "center",
-      pointAt: "board",
-    });
+    // The prose is spoken exactly once. It is only repeated here when the
+    // progressive-math path replaced the prose beats, so nothing is ever
+    // narrated twice.
+    if (mathSteps.length && block.body.trim()) {
+      push({
+        phase: "highlight",
+        label: shorten(block.label, 28),
+        say: `${phrase.explain} ${block.body}`,
+        teacher: "explain",
+        moveTo: "center",
+        pointAt: "board",
+      });
+    }
 
     if (block.example) {
       for (const line of chunkProse(block.example, 220)) {
