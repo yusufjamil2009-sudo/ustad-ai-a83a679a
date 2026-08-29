@@ -165,7 +165,6 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
   push({
     phase: "question",
     label: shorten(content.title, 30),
-    say: content.title,
     teacher: "write",
     moveTo: "board",
     pointAt: "board",
