@@ -78,8 +78,11 @@ export async function availableVoiceProviders(token: unknown) {
     tts: available
       .filter((p) => ["elevenlabs", "deepgram", "openai"].includes(p.provider))
       .map((p) => p.provider),
-    stt: available
-      .filter((p) => ["deepgram", "groq", "openai", "assemblyai"].includes(p.provider))
-      .map((p) => p.provider),
+    stt: [
+      ...available
+        .filter((p) => ["deepgram", "groq", "openai", "assemblyai"].includes(p.provider))
+        .map((p) => p.provider),
+      ...(process.env["LOVABLE_API_KEY"] ? ["lovable"] : []),
+    ],
   };
 }
