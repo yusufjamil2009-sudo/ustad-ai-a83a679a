@@ -10,33 +10,154 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ClassroomRouteImport } from './routes/classroom'
+import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as NotesRouteImport } from './routes/notes'
+import { Route as RemindersRouteImport } from './routes/reminders'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as StudyRouteImport } from './routes/study'
+import { Route as ExamsIndexRouteImport } from './routes/exams.index'
+import { Route as ExamsExamIdRouteImport } from './routes/exams.$examId'
+import { Route as ApiPublicExamSchedulerRouteImport } from './routes/api/public/exam-scheduler'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClassroomRoute = ClassroomRouteImport.update({
+  id: '/classroom',
+  path: '/classroom',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MemoryRoute = MemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotesRoute = NotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RemindersRoute = RemindersRouteImport.update({
+  id: '/reminders',
+  path: '/reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudyRoute = StudyRouteImport.update({
+  id: '/study',
+  path: '/study',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsIndexRoute = ExamsIndexRouteImport.update({
+  id: '/exams/',
+  path: '/exams/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsExamIdRoute = ExamsExamIdRouteImport.update({
+  id: '/exams/$examId',
+  path: '/exams/$examId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicExamSchedulerRoute = ApiPublicExamSchedulerRouteImport.update({
+  id: '/api/public/exam-scheduler',
+  path: '/api/public/exam-scheduler',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/classroom': typeof ClassroomRoute
+  '/memory': typeof MemoryRoute
+  '/notes': typeof NotesRoute
+  '/reminders': typeof RemindersRoute
+  '/settings': typeof SettingsRoute
+  '/study': typeof StudyRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
+  '/exams/': typeof ExamsIndexRoute
+  '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/classroom': typeof ClassroomRoute
+  '/memory': typeof MemoryRoute
+  '/notes': typeof NotesRoute
+  '/reminders': typeof RemindersRoute
+  '/settings': typeof SettingsRoute
+  '/study': typeof StudyRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
+  '/exams': typeof ExamsIndexRoute
+  '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/classroom': typeof ClassroomRoute
+  '/memory': typeof MemoryRoute
+  '/notes': typeof NotesRoute
+  '/reminders': typeof RemindersRoute
+  '/settings': typeof SettingsRoute
+  '/study': typeof StudyRoute
+  '/exams/$examId': typeof ExamsExamIdRoute
+  '/exams/': typeof ExamsIndexRoute
+  '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/classroom'
+    | '/memory'
+    | '/notes'
+    | '/reminders'
+    | '/settings'
+    | '/study'
+    | '/exams/$examId'
+    | '/exams/'
+    | '/api/public/exam-scheduler'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/classroom'
+    | '/memory'
+    | '/notes'
+    | '/reminders'
+    | '/settings'
+    | '/study'
+    | '/exams/$examId'
+    | '/exams'
+    | '/api/public/exam-scheduler'
+  id:
+    | '__root__'
+    | '/'
+    | '/classroom'
+    | '/memory'
+    | '/notes'
+    | '/reminders'
+    | '/settings'
+    | '/study'
+    | '/exams/$examId'
+    | '/exams/'
+    | '/api/public/exam-scheduler'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ClassroomRoute: typeof ClassroomRoute
+  MemoryRoute: typeof MemoryRoute
+  NotesRoute: typeof NotesRoute
+  RemindersRoute: typeof RemindersRoute
+  SettingsRoute: typeof SettingsRoute
+  StudyRoute: typeof StudyRoute
+  ExamsExamIdRoute: typeof ExamsExamIdRoute
+  ExamsIndexRoute: typeof ExamsIndexRoute
+  ApiPublicExamSchedulerRoute: typeof ApiPublicExamSchedulerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +169,83 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/classroom': {
+      id: '/classroom'
+      path: '/classroom'
+      fullPath: '/classroom'
+      preLoaderRoute: typeof ClassroomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/memory': {
+      id: '/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof MemoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notes': {
+      id: '/notes'
+      path: '/notes'
+      fullPath: '/notes'
+      preLoaderRoute: typeof NotesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reminders': {
+      id: '/reminders'
+      path: '/reminders'
+      fullPath: '/reminders'
+      preLoaderRoute: typeof RemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/study': {
+      id: '/study'
+      path: '/study'
+      fullPath: '/study'
+      preLoaderRoute: typeof StudyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams/': {
+      id: '/exams/'
+      path: '/exams'
+      fullPath: '/exams/'
+      preLoaderRoute: typeof ExamsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams/$examId': {
+      id: '/exams/$examId'
+      path: '/exams/$examId'
+      fullPath: '/exams/$examId'
+      preLoaderRoute: typeof ExamsExamIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/exam-scheduler': {
+      id: '/api/public/exam-scheduler'
+      path: '/api/public/exam-scheduler'
+      fullPath: '/api/public/exam-scheduler'
+      preLoaderRoute: typeof ApiPublicExamSchedulerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ClassroomRoute: ClassroomRoute,
+  MemoryRoute: MemoryRoute,
+  NotesRoute: NotesRoute,
+  RemindersRoute: RemindersRoute,
+  SettingsRoute: SettingsRoute,
+  StudyRoute: StudyRoute,
+  ExamsExamIdRoute: ExamsExamIdRoute,
+  ExamsIndexRoute: ExamsIndexRoute,
+  ApiPublicExamSchedulerRoute: ApiPublicExamSchedulerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

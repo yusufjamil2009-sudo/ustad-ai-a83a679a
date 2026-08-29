@@ -1,0 +1,661 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** All guest-scoped data operations. Every query is filtered by the verified guest id. */
+import { requireGuest, db, ensureGuestRow, newGuestId, issueToken } from "./guest.server";
+import { stripProtectedFields } from "./strip-protected";
+
+export { stripProtectedFields } from "./strip-protected";
+
+export async function bootstrapGuest(token?: string) {
+  const { readGuestCookie, writeGuestCookie } = await import("./guest.server");
+  let guestId = token ? await safeVerify(token) : null;
+  if (!guestId) guestId = await safeVerify((await readGuestCookie()) ?? "");
+  let issued = token ?? "";
+  if (!guestId) {
+    guestId = newGuestId();
+    issued = await issueToken(guestId);
+  } else {
+    issued = await issueToken(guestId);
+  }
+  await ensureGuestRow(guestId);
+  const cookieSet = await writeGuestCookie(issued);
+  const client = db();
+  const [{ data: profile }, { data: settings }] = await Promise.all([
+    client.from("profiles").select("*").eq("guest_id", guestId).maybeSingle(),
+    client.from("settings").select("*").eq("guest_id", guestId).maybeSingle(),
+  ]);
+  return { guestId, token: issued, profile, settings, cookieSet };
+}
+
+async function safeVerify(token: string) {
+  const { verifyToken } = await import("./guest.server");
+  const id = await verifyToken(token);
+  if (!id) return null;
+  return id;
+}
+
+/* ---------- conversations ---------- */
+
+export async function listConversations(token: unknown) {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("conversations")
+    .select("id,title,pinned,created_at,updated_at")
+    .eq("guest_id", guestId)
+    .order("pinned", { ascending: false })
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function createConversation(token: unknown, title = "New chat") {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("conversations")
+    .insert({ guest_id: guestId, title })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateConversation(
+  token: unknown,
+  id: string,
+  patch: { title?: string; pinned?: boolean },
+) {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("conversations")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("guest_id", guestId)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Conversation not found");
+  return data;
+}
+
+export async function deleteConversation(token: unknown, id: string) {
+  const guestId = await requireGuest(token);
+  const { error } = await db().from("conversations").delete().eq("id", id).eq("guest_id", guestId);
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
+
+export async function listMessages(token: unknown, conversationId: string) {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("messages")
+    .select("*")
+    .eq("guest_id", guestId)
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  // Bug 22: hydrate attachment previews so uploaded images still render after
+  // a refresh. Message JSON only stores ids; the bytes live in attachments.
+  const ids: string[] = [];
+  for (const row of rows) {
+    for (const a of (row.attachments as Array<{ id?: string }>) ?? []) {
+      if (a?.id) ids.push(a.id);
+    }
+  }
+  if (!ids.length) return rows;
+  const { data: files } = await db()
+    .from("attachments")
+    .select("id,name,mime,kind,data")
+    .eq("guest_id", guestId)
+    .in("id", ids);
+  const byId = new Map((files ?? []).map((f) => [f.id, f]));
+  return Promise.all(
+    rows.map(async (row) => {
+      const atts =
+        (row.attachments as Array<{ id?: string; name?: string; mime?: string; kind?: string }>) ??
+        [];
+      if (!atts.length) return row;
+      const hydrated = await Promise.all(
+        atts.map(async (a) => {
+          const f = a.id ? byId.get(a.id) : undefined;
+          if (!f) return a;
+          const previewUrl =
+            f.kind === "image"
+              ? ((await signedUrlFor(f.data as string | null)) ??
+                resolveAttachmentSrc(f.data as string | null))
+              : undefined;
+          return {
+            id: f.id,
+            name: f.name ?? a.name,
+            mime: f.mime ?? a.mime,
+            kind: f.kind ?? a.kind,
+            ...(previewUrl ? { previewUrl } : {}),
+          };
+        }),
+      );
+      return { ...row, attachments: hydrated };
+    }),
+  );
+}
+
+function resolveAttachmentSrc(data: string | null): string | undefined {
+  if (!data) return undefined;
+  if (data.startsWith("data:")) return data;
+  if (data.startsWith("http://") || data.startsWith("https://")) return data;
+  return undefined;
+}
+
+/* ---------- profile & settings ---------- */
+
+export async function saveProfile(token: unknown, patch: Record<string, unknown>) {
+  const guestId = await requireGuest(token);
+  const safe = stripProtectedFields(patch);
+  const { data, error } = await (db().from("profiles") as any)
+    .upsert(
+      { ...safe, guest_id: guestId, updated_at: new Date().toISOString() },
+      { onConflict: "guest_id" },
+    )
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function saveSettings(token: unknown, patch: Record<string, unknown>) {
+  const guestId = await requireGuest(token);
+  const safe = stripProtectedFields(patch);
+  const { data, error } = await (db().from("settings") as any)
+    .upsert(
+      { ...safe, guest_id: guestId, updated_at: new Date().toISOString() },
+      { onConflict: "guest_id" },
+    )
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getProfile(token: unknown) {
+  const guestId = await requireGuest(token);
+  const client = db();
+  const [{ data: profile }, { data: settings }] = await Promise.all([
+    client.from("profiles").select("*").eq("guest_id", guestId).maybeSingle(),
+    client.from("settings").select("*").eq("guest_id", guestId).maybeSingle(),
+  ]);
+  return { profile, settings };
+}
+
+/* ---------- simple owned collections ---------- */
+
+type Table = "memories" | "goals" | "notes" | "reminders" | "lessons" | "exams" | "exam_results";
+
+export async function listRows(token: unknown, table: Table, order = "created_at") {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from(table)
+    .select("*")
+    .eq("guest_id", guestId)
+    .order(order, { ascending: table === "reminders" });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function insertRow(token: unknown, table: Table, values: Record<string, unknown>) {
+  const guestId = await requireGuest(token);
+  const safe = stripProtectedFields(values);
+  const { data, error } = await (db().from(table) as any)
+    .insert({ ...safe, guest_id: guestId })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateRow(
+  token: unknown,
+  table: Table,
+  id: string,
+  patch: Record<string, unknown>,
+) {
+  const guestId = await requireGuest(token);
+  const safe = stripProtectedFields(patch);
+  const { data, error } = await (db().from(table) as any)
+    .update(safe)
+    .eq("id", id)
+    .eq("guest_id", guestId)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Item not found");
+  return data;
+}
+
+export async function deleteRow(token: unknown, table: Table, id: string) {
+  const guestId = await requireGuest(token);
+  const { error } = await db().from(table).delete().eq("id", id).eq("guest_id", guestId);
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
+
+/* ---------- attachments ---------- */
+
+const MAX_BYTES = 8 * 1024 * 1024;
+const STORAGE_BUCKET = "ustad-attachments";
+const STORAGE_PREFIX = "storage:";
+
+/** Bug #22: discover/create the bucket once per process, not on every upload. */
+let bucketReady: Promise<boolean> | null = null;
+
+async function ensureAttachmentBucket(): Promise<boolean> {
+  if (!bucketReady) {
+    bucketReady = (async () => {
+      try {
+        const { data } = await db().storage.listBuckets();
+        if (data?.some((b) => b.name === STORAGE_BUCKET)) return true;
+        const { error } = await db().storage.createBucket(STORAGE_BUCKET, {
+          public: false,
+          fileSizeLimit: MAX_BYTES,
+        });
+        if (error && !/already exists|duplicate/i.test(error.message)) return false;
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+  }
+  const ok = await bucketReady;
+  if (!ok) bucketReady = null;
+  return ok;
+}
+
+async function uploadToStorage(
+  guestId: string,
+  id: string,
+  bytes: Uint8Array,
+  mime: string,
+): Promise<string | null> {
+  const ok = await ensureAttachmentBucket();
+  if (!ok) return null;
+  const path = `${guestId}/${id}`;
+  const { error } = await db().storage.from(STORAGE_BUCKET).upload(path, bytes, {
+    contentType: mime,
+    upsert: true,
+  });
+  if (error) return null;
+  return `${STORAGE_PREFIX}${path}`;
+}
+
+async function deleteStorageObject(data: string | null): Promise<void> {
+  if (!data?.startsWith(STORAGE_PREFIX)) return;
+  const path = data.slice(STORAGE_PREFIX.length);
+  try {
+    await db().storage.from(STORAGE_BUCKET).remove([path]);
+  } catch {
+    /* physical delete is best-effort once the DB row is gone */
+  }
+}
+
+async function signedUrlFor(data: string | null): Promise<string | undefined> {
+  if (!data) return undefined;
+  if (data.startsWith("data:") || data.startsWith("http")) return data;
+  if (!data.startsWith(STORAGE_PREFIX)) return undefined;
+  const path = data.slice(STORAGE_PREFIX.length);
+  const { data: signed, error } = await db()
+    .storage.from(STORAGE_BUCKET)
+    .createSignedUrl(path, 3600);
+  if (error || !signed?.signedUrl) return undefined;
+  return signed.signedUrl;
+}
+
+/**
+ * Resolve an attachment `data` column into a provider-usable URL (Bug #1).
+ * `storage:guest/id` is NEVER sent to a vision/OCR provider — only a signed
+ * HTTPS URL or a data: URL. Ownership is enforced by the caller (guest filter).
+ */
+export async function resolveAttachmentForProvider(data: string | null): Promise<string> {
+  if (!data) throw new Error("Attachment has no stored data.");
+  if (data.startsWith("data:")) return data;
+  if (data.startsWith("https://") || data.startsWith("http://")) return data;
+  if (data.startsWith(STORAGE_PREFIX)) {
+    const url = await signedUrlFor(data);
+    if (!url)
+      throw new Error("Attachment storage URL could not be resolved. The file may have expired.");
+    return url;
+  }
+  throw new Error("Unsupported attachment storage format.");
+}
+
+/** Fetch a signed/https image as a data URL (OCR.space wants base64). */
+export async function attachmentAsDataUrl(data: string | null): Promise<string> {
+  const resolved = await resolveAttachmentForProvider(data);
+  if (resolved.startsWith("data:")) return resolved;
+  const res = await fetch(resolved);
+  if (!res.ok) throw new Error(`Could not read attachment bytes (${res.status}).`);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const mime = res.headers.get("content-type") || "application/octet-stream";
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) {
+    bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  }
+  return `data:${mime};base64,${btoa(bin)}`;
+}
+const ALLOWED =
+  /^(image\/(png|jpeg|jpg|webp|gif)|application\/pdf|text\/plain|text\/markdown|text\/csv|application\/(msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document))$/;
+
+export type SavedAttachment = {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "pdf" | "document";
+  data: string | null;
+  extracted_text: string | null;
+};
+
+/** Rolling retention cap per (guest, kind) for not-yet-referenced files. */
+const RETAIN = { image: 5, pdf: 5 } as const;
+
+function decodeDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } {
+  const m = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!m) throw new Error("Malformed file data.");
+  const mime = (m[1] ?? "application/octet-stream").toLowerCase();
+  const b64 = m[3] ?? "";
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { mime, bytes };
+}
+
+function looksLikePdf(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 && String.fromCharCode(...bytes.subarray(0, 5)) === "%PDF-";
+}
+
+function looksLikeImage(bytes: Uint8Array, mime: string): boolean {
+  // Magic-byte sniff so a renamed executable cannot pass as an image.
+  const head = [...bytes.subarray(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  if (mime === "image/png") return head.startsWith("89 50 4e 47");
+  if (mime === "image/jpeg") return head.startsWith("ff d8 ff");
+  if (mime === "image/gif") return head.startsWith("47 49 46 38");
+  if (mime === "image/webp")
+    return head.startsWith("52 49 46 46") && head.slice(18, 23) === "57 45 42 50";
+  return false;
+}
+
+/**
+ * Enforce the rolling retention cap for a guest. Oldest unreferenced files
+ * of the same kind beyond the cap are deleted (server-authoritative, Bug 1).
+ * Referenced attachments (already attached to a message) are kept.
+ */
+/**
+ * Enforce the rolling retention cap for a guest (Bug 1). After inserting a
+ * new unreferenced attachment, keep only the newest CAP of that kind and
+ * delete older ones. Attachments already referenced by a message are kept.
+ */
+async function enforceRetention(guestId: string, kind: "image" | "pdf"): Promise<void> {
+  const cap = RETAIN[kind];
+  const { data: all } = await db()
+    .from("attachments")
+    .select("id, created_at, data")
+    .eq("guest_id", guestId)
+    .eq("kind", kind)
+    .order("created_at", { ascending: true });
+  if (!all || all.length <= cap) return;
+
+  const { data: used } = await db().from("messages").select("attachments").eq("guest_id", guestId);
+  const referenced = new Set<string>();
+  for (const row of used ?? []) {
+    for (const a of (row.attachments as Array<{ id?: string }>) ?? [])
+      if (a?.id) referenced.add(a.id);
+  }
+  // Only unreferenced files count against the rolling cap; delete the oldest
+  // until at most cap unreferenced files remain.
+  const unreferenced = all.filter((a) => !referenced.has(a.id));
+  const excess = unreferenced.length - cap;
+  if (excess <= 0) return;
+  const doomed = unreferenced.slice(0, excess);
+  const toDelete = doomed.map((a) => a.id);
+  if (toDelete.length) {
+    // Bug 28: delete the physical storage object along with the DB row.
+    for (const row of doomed)
+      await deleteStorageObject((row as { data?: string | null }).data ?? null);
+    const { error } = await db()
+      .from("attachments")
+      .delete()
+      .eq("guest_id", guestId)
+      .in("id", toDelete);
+    if (error) throw new Error(error.message);
+  }
+}
+
+export async function saveAttachment(
+  token: unknown,
+  file: { name: string; mime: string; size: number; dataUrl: string },
+) {
+  const guestId = await requireGuest(token);
+
+  // Decode and inspect the ACTUAL payload (Bug 3) — never trust client size/mime.
+  const { mime: decodedMime, bytes } = decodeDataUrl(file.dataUrl);
+  if (bytes.length > MAX_BYTES) throw new Error("File too large. Maximum size is 8 MB.");
+
+  // MIME must be allowed and must match what the client claimed.
+  const claimed = (file.mime ?? "").toLowerCase();
+  if (!ALLOWED.test(decodedMime)) throw new Error(`Unsupported file type: ${decodedMime}`);
+  if (claimed && claimed !== decodedMime)
+    throw new Error("File content does not match its declared type.");
+
+  const kind = decodedMime.startsWith("image/")
+    ? "image"
+    : decodedMime === "application/pdf"
+      ? "pdf"
+      : "document";
+
+  // Validate actual file structure.
+  if (kind === "image" && !looksLikeImage(bytes, decodedMime)) {
+    throw new Error("File is not a valid image.");
+  }
+  if (kind === "pdf" && !looksLikePdf(bytes)) {
+    throw new Error("File is not a valid PDF.");
+  }
+
+  let extracted: string | null = null;
+  if (kind === "pdf") {
+    try {
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const doc = await getDocumentProxy(bytes);
+      const { text } = await extractText(doc, { mergePages: true });
+      extracted = String(text).slice(0, 20000);
+    } catch {
+      extracted = null;
+    }
+  } else if (kind === "document" && decodedMime.startsWith("text/")) {
+    try {
+      extracted = new TextDecoder().decode(bytes).slice(0, 20000);
+    } catch {
+      extracted = null;
+    }
+  }
+
+  const { data, error } = await db()
+    .from("attachments")
+    .insert({
+      guest_id: guestId,
+      name: file.name,
+      mime: decodedMime,
+      size: bytes.length,
+      kind,
+      data: "",
+      extracted_text: extracted,
+    })
+    .select("id,name,mime,size,kind,extracted_text")
+    .single();
+  if (error) throw new Error(error.message);
+
+  // Bug 2: prefer binary object storage. If the bucket is not provisioned,
+  // keep the validated payload in the existing `data` column so uploads still
+  // work — this is the documented compatibility path, not a fake success.
+  const stored = (await uploadToStorage(guestId, data.id, bytes, decodedMime)) ?? file.dataUrl;
+  await db().from("attachments").update({ data: stored }).eq("id", data.id).eq("guest_id", guestId);
+
+  // Enforce rolling limit AFTER a successful insert (newest N retained).
+  if (kind === "image" || kind === "pdf") await enforceRetention(guestId, kind);
+
+  return data;
+}
+
+/** Move a generated-image data URL into object storage (Bugs 2, 27). */
+export async function storeGeneratedImageData(
+  guestId: string,
+  attachmentId: string,
+  dataUrl: string,
+): Promise<string> {
+  const { mime, bytes } = decodeDataUrl(dataUrl);
+  return (await uploadToStorage(guestId, attachmentId, bytes, mime)) ?? dataUrl;
+}
+
+/**
+ * Bug #20: signed direct upload slot. Client PUTs the raw file to `uploadUrl`
+ * then the `data` column is set to storage:path. Small files can still use
+ * saveAttachment (data URL) — this is the large-file path.
+ */
+export async function beginDirectUpload(
+  token: unknown,
+  file: { name: string; mime: string; size: number },
+) {
+  const guestId = await requireGuest(token);
+  if (file.size > MAX_BYTES) throw new Error("File too large. Maximum size is 8 MB.");
+  const mime = (file.mime ?? "").toLowerCase();
+  if (!ALLOWED.test(mime)) throw new Error(`Unsupported file type: ${mime}`);
+  const kind = mime.startsWith("image/")
+    ? "image"
+    : mime === "application/pdf"
+      ? "pdf"
+      : "document";
+  const { data, error } = await db()
+    .from("attachments")
+    .insert({
+      guest_id: guestId,
+      name: file.name,
+      mime,
+      size: file.size,
+      kind,
+      data: "",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  const ok = await ensureAttachmentBucket();
+  if (!ok) throw new Error("Object storage is not configured for direct upload.");
+  const path = `${guestId}/${data.id}`;
+  const { data: signed, error: signErr } = await db()
+    .storage.from(STORAGE_BUCKET)
+    .createSignedUploadUrl(path);
+  if (signErr || !signed?.signedUrl) {
+    throw new Error("Could not create a signed upload URL.");
+  }
+  // `data` stays empty until finalizeDirectUpload verifies the object exists.
+  return { id: data.id, uploadUrl: signed.signedUrl, path: `${STORAGE_PREFIX}${path}` };
+}
+
+/**
+ * After the client PUTs bytes to the signed URL, verify the object and point
+ * the attachment row at `storage:guest/id`. Magic-byte sniff rejects a renamed
+ * executable the same way saveAttachment does.
+ */
+export async function finalizeDirectUpload(token: unknown, id: string) {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("attachments")
+    .select("id,name,mime,kind,size,data")
+    .eq("id", id)
+    .eq("guest_id", guestId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Attachment not found");
+  const path = `${guestId}/${id}`;
+  const { data: signed, error: signErr } = await db()
+    .storage.from(STORAGE_BUCKET)
+    .createSignedUrl(path, 120);
+  if (signErr || !signed?.signedUrl) {
+    throw new Error("Upload was not found in storage. Try again.");
+  }
+  const head = await fetch(signed.signedUrl, { headers: { Range: "bytes=0-31" } });
+  if (!head.ok && head.status !== 206) {
+    throw new Error(`Could not verify uploaded file (${head.status}).`);
+  }
+  const bytes = new Uint8Array(await head.arrayBuffer());
+  const mime = (data.mime ?? "").toLowerCase();
+  if (data.kind === "image" && !looksLikeImage(bytes, mime)) {
+    await deleteStorageObject(`${STORAGE_PREFIX}${path}`);
+    await db().from("attachments").delete().eq("id", id).eq("guest_id", guestId);
+    throw new Error("File is not a valid image.");
+  }
+  if (data.kind === "pdf" && !looksLikePdf(bytes)) {
+    await deleteStorageObject(`${STORAGE_PREFIX}${path}`);
+    await db().from("attachments").delete().eq("id", id).eq("guest_id", guestId);
+    throw new Error("File is not a valid PDF.");
+  }
+  const stored = `${STORAGE_PREFIX}${path}`;
+  await db().from("attachments").update({ data: stored }).eq("id", id).eq("guest_id", guestId);
+  if (data.kind === "image" || data.kind === "pdf") await enforceRetention(guestId, data.kind);
+  return { id: data.id, name: data.name, mime: data.mime, kind: data.kind, data: stored };
+}
+
+export async function getAttachment(token: unknown, id: string) {
+  const guestId = await requireGuest(token);
+  const { data, error } = await db()
+    .from("attachments")
+    .select("*")
+    .eq("id", id)
+    .eq("guest_id", guestId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Attachment not found");
+  return data;
+}
+
+/* ---------- clear cache / clear data ---------- */
+
+export async function clearCache(token: unknown) {
+  const guestId = await requireGuest(token);
+  const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { data: used } = await db().from("messages").select("attachments").eq("guest_id", guestId);
+  const keep = new Set<string>();
+  for (const row of used ?? []) {
+    for (const a of (row.attachments as Array<{ id?: string }>) ?? []) if (a?.id) keep.add(a.id);
+  }
+  const { data: all } = await db()
+    .from("attachments")
+    .select("id,data")
+    .eq("guest_id", guestId)
+    .lt("created_at", cutoff);
+  const doomed = (all ?? []).filter((a) => !keep.has(a.id));
+  const removable = doomed.map((a) => a.id);
+  if (removable.length) {
+    for (const row of doomed) await deleteStorageObject(row.data as string | null);
+    await db().from("attachments").delete().eq("guest_id", guestId).in("id", removable);
+  }
+  return { removed: removable.length };
+}
+
+export async function clearData(token: unknown, scopes: string[]) {
+  const guestId = await requireGuest(token);
+  const map: Record<string, Table | "conversations" | "attachments" | "api_configs"> = {
+    chats: "conversations",
+    attachments: "attachments",
+    memories: "memories",
+    goals: "goals",
+    notes: "notes",
+    reminders: "reminders",
+    lessons: "lessons",
+    exams: "exams",
+    api: "api_configs",
+  };
+  const cleared: string[] = [];
+  for (const scope of scopes) {
+    const table = map[scope];
+    if (!table) continue;
+    const { error } = await db().from(table).delete().eq("guest_id", guestId);
+    if (error) throw new Error(error.message);
+    cleared.push(scope);
+  }
+  return { cleared };
+}

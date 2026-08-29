@@ -1,12 +1,12 @@
-# USTAD AI
+# Remix of USTAD AI
 
-Hii mai tumko repo ka link dunga aur prompt dunga ok tum use build karna fixed karna ok
+Tum ek kaam karo part 1+ part 2 ka all sections all sections ek bhi section chutan nahi chahiye ek bhi hissa baaki na rahe all properly build and properly working pls all sections part 1+ part 2 all properly working build ek bhi hissa nahi chutna chahiye
 
 This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/04bfccf7-c39c-4910-9729-8204343075b5).
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/97df169b-efd2-438c-8c3c-e251af4f74d0).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
 - **Stay in sync**: every change made in Lovable is committed straight to this repository.

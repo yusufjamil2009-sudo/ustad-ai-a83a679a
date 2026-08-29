@@ -1,0 +1,1588 @@
+/**
+ * Board engine + Board Layout Engine.
+ *
+ * Root cause fixed: every element used to be pushed at a fixed x with a single
+ * running cursorY, and diagrams were hard-pinned at (1050, 250) — so long text,
+ * Hindi text and diagrams silently drew on top of each other.
+ *
+ * Now every element carries a real bounding box, a semantic role and a region.
+ * Placement searches its region for free space (bounding-box collision test),
+ * falls back to another region, and when the whole board is full it archives the
+ * oldest non-title content instead of overwriting it. Board state is fully
+ * described by the item list, so it is recoverable from timeline state.
+ */
+import * as THREE from "three";
+import {
+  clusterStarts,
+  drawMath,
+  measureMath,
+  needsMathLayout,
+  parseMath,
+  type MathNode,
+} from "./mathtype";
+import { writeDurationMs, type BoardOp, type DiagramKind } from "./types";
+
+const W = 2560;
+const H = 880;
+const PAD = 26;
+
+/**
+ * AUTHORITATIVE typography metric (§7). Layout, collision, snapshot sizing,
+ * underline geometry and the pen-tip tracker ALL use this one function — there
+ * is no second line-height calculation anywhere in the board engine.
+ */
+const LINE_H = 1.32;
+const lineH = (size: number): number => size * LINE_H;
+
+/**
+ * PERF: repaint/upload cadence while strokes animate. The board is a
+ * 2560×880 CanvasTexture — every repaint re-uploads ~9 MB to the GPU and
+ * regenerates its mipmaps, which at 60 Hz produced multi-hundred-millisecond
+ * main-thread blocks on mobile ("canvas render ≈ 2612ms / 1155ms / 677ms…").
+ * 30 Hz is visually identical for handwriting and halves the worst-case cost.
+ */
+const PAINT_INTERVAL = 1 / 30;
+
+/**
+ * Physical writing surface. Sized and hung at a real teaching height so the
+ * teacher's standing shoulder + extended arm can actually reach the TOP row of
+ * the board (old board was 4.22 m tall hung at y=2.4 → its upper half was
+ * physically unreachable, which is why the hand never met the writing).
+ */
+const SURFACE_W = 6.4;
+const SURFACE_H = 2.2;
+const SURFACE_Y = 1.5;
+const SURFACE_Z = -6.18;
+
+/** Fonts: Devanagari-capable stack so Hindi/Hinglish renders as real glyphs. */
+const FONT_STACK = '"Noto Sans Devanagari", Sora, "Segoe UI", sans-serif';
+
+export type BoardRole =
+  "title" | "concept" | "formula" | "diagram" | "example" | "summary" | "mark";
+
+/** Deterministic, serialisable snapshot of the full board (§25). */
+export type BoardSnapshot = {
+  version: 1;
+  items: Array<{
+    id: number;
+    kind: Item["kind"];
+    role: BoardRole;
+    region: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    z: number;
+    scale: number;
+    reveal: number;
+    text?: string;
+    lines?: string[];
+    size?: number;
+    color?: string;
+    points?: [number, number][];
+    to?: [number, number];
+    from?: [number, number];
+    diagram?:
+      | {
+          kind: DiagramKind;
+          title?: string | undefined;
+          data?: number[] | undefined;
+          labels?: string[] | undefined;
+        }
+      | undefined;
+    highlight?: boolean;
+    underline?: boolean;
+    circled?: boolean;
+    hasMath?: boolean;
+  }>;
+  viewport: { minSize: number; sizeScale: number };
+};
+
+type Region = { name: string; x: number; y: number; w: number; h: number };
+
+/**
+ * Layout regions of a real teacher's board.
+ *
+ * §2/§16 fix: the DIAGRAM column is TALL (250..800) because real diagram
+ * drawings (bars+labels, cycle+labels, photosynthesis) occupy up to ~540 px of
+ * drawing space — the old 380 px-tall diagram region could never contain the
+ * declared 470 px box, so EVERY diagram placement failed, fell through every
+ * region and finally wiped the whole board. Formula and example now sit
+ * side-by-side under the concept block; summary spans the full bottom row.
+ */
+const REGIONS: Record<string, Region> = {
+  title: { name: "title", x: 120, y: 70, w: 2300, h: 140 },
+  concept: { name: "concept", x: 120, y: 240, w: 1240, h: 390 },
+  formula: { name: "formula", x: 120, y: 650, w: 600, h: 150 },
+  diagram: { name: "diagram", x: 1440, y: 240, w: 980, h: 570 },
+  example: { name: "example", x: 760, y: 650, w: 600, h: 150 },
+  summary: { name: "summary", x: 120, y: 650, w: 2300, h: 150 },
+};
+
+const ROLE_REGION: Record<BoardRole, string[]> = {
+  title: ["title", "concept"],
+  concept: ["concept", "diagram", "example"],
+  formula: ["formula", "concept", "example"],
+  diagram: ["diagram", "concept"],
+  example: ["example", "formula", "concept"],
+  summary: ["summary", "concept"],
+  mark: ["concept", "diagram"],
+};
+
+type Item = {
+  id: number;
+  kind: "text" | "path" | "diagram" | "arrow" | "math";
+  role: BoardRole;
+  region: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  scale: number;
+  lines?: string[];
+  text?: string;
+  size?: number;
+  color: string;
+  language: "hi" | "en" | "mixed";
+  highlight?: boolean;
+  underline?: boolean;
+  circled?: boolean;
+  points?: [number, number][];
+  diagram?: {
+    kind: DiagramKind;
+    title?: string | undefined;
+    data?: number[] | undefined;
+    labels?: string[] | undefined;
+  };
+  to?: [number, number];
+  /** arrow tail, RELATIVE to the item origin (head `to` is relative too) */
+  from?: [number, number];
+  /** typeset math tree (kind === "math") */
+  math?: MathNode[];
+  mathInk?: number;
+  mathAsc?: number;
+  /** live pen tip produced by the math typesetter while it is being written */
+  tip?: [number, number];
+  reveal: number; // 0..1 handwriting animation
+  /** ms this element genuinely needs to be written by hand (content-driven) */
+  writeMs: number;
+};
+
+const DEVANAGARI = /[\u0900-\u097F]/;
+
+function detectLang(s: string): "hi" | "en" | "mixed" {
+  const hi = DEVANAGARI.test(s);
+  const en = /[A-Za-z]/.test(s);
+  return hi && en ? "mixed" : hi ? "hi" : "en";
+}
+
+/**
+ * Semantic role detection (§8). A formula is a SHORT string of math tokens —
+ * digits, single-letter variables, Greek letters, superscript glyphs and
+ * operators — where EVERY operator-separated term stays ≤ 4 characters.
+ * This correctly classifies  x = 2 · y = mx + c · 2x + 5 = 15 · a² + b² = c² ·
+ * α + β = γ  while never mistaking a teaching sentence (long word tokens,
+ * Devanagari prose, "E = energy of light") for a formula. op.role always wins.
+ */
+const FORMULA_CHARS = /^[a-zA-Z0-9=²³¹⁰°√πα-ωΑ-ΩΔθλμ+*/^()×÷.,'-]+$/;
+
+export function roleOf(text: string, size: number): BoardRole {
+  const compact = text.replace(/\s+/g, "");
+  if (
+    compact.length > 0 &&
+    compact.length <= 32 &&
+    /[=+*/^×÷-]/.test(compact) &&
+    FORMULA_CHARS.test(compact) &&
+    /[0-9a-zA-Zα-ωΑ-Ω]/.test(compact) &&
+    compact.split(/[=+*/^×÷-]/).every((t) => t.length <= 4)
+  ) {
+    return "formula";
+  }
+  if (/^(example|उदाहरण|eg\b|e\.g\.)/i.test(text.trim())) return "example";
+  if (/^(summary|recap|सारांश)/i.test(text.trim())) return "summary";
+  return size >= 76 ? "title" : "concept";
+}
+
+const SUB = {
+  "0": "₀",
+  "1": "₁",
+  "2": "₂",
+  "3": "₃",
+  "4": "₄",
+  "5": "₅",
+  "6": "₆",
+  "7": "₇",
+  "8": "₈",
+  "9": "₉",
+} as const;
+const SUP = {
+  "0": "⁰",
+  "1": "¹",
+  "2": "²",
+  "3": "³",
+  "4": "⁴",
+  "5": "⁵",
+  "6": "⁶",
+  "7": "⁷",
+  "8": "⁸",
+  "9": "⁹",
+} as const;
+
+/**
+ * Symbol pass — operators, arrows and Greek letters become real glyphs, but
+ * fractions, roots, powers and subscripts are PRESERVED so the 2D math
+ * typesetter can stack and progressively write them like a real teacher.
+ */
+export function symbolize(raw: string): string {
+  let s = raw;
+  s = s.replace(/\\(times|cdot)\b/g, "×").replace(/\\div\b/g, "÷");
+  s = s.replace(/\\(rightarrow|to|Rightarrow)\b/g, "→").replace(/->/g, "→");
+  s = s.replace(/\\(alpha|beta|theta|pi|lambda|mu|omega|Delta|delta|sum)\b/g, (_m, g: string) => {
+    const map: Record<string, string> = {
+      alpha: "α",
+      beta: "β",
+      theta: "θ",
+      pi: "π",
+      lambda: "λ",
+      mu: "μ",
+      omega: "ω",
+      Delta: "Δ",
+      delta: "δ",
+      sum: "Σ",
+    };
+    return map[g] ?? g;
+  });
+  // §9: \text{…}/\mathrm{…} keep their CONTENT — the old pass stripped only the
+  // command name and leaked the braces straight into parseMath (rendered "{}").
+  s = s.replace(/\\(?:text|mathrm)\s*\{([^{}]*)\}/g, "$1");
+  s = s.replace(/\\(?:left|right|displaystyle)\b/g, "").replace(/\$/g, "");
+  return s.replace(/\s{2,}/g, " ").trim();
+}
+
+/**
+ * Real chemical elements (§10) — subscript conversion applies ONLY to tokens
+ * made of these symbols plus digits (H2O, CO2, C6H12O6, 6CO2…). Ordinary
+ * words-with-numbers (Class2, Chapter2, Room2, Unit4…) are protected.
+ */
+const CHEM_ELEMENTS = new Set([
+  "H",
+  "He",
+  "Li",
+  "Be",
+  "B",
+  "C",
+  "N",
+  "O",
+  "F",
+  "Ne",
+  "Na",
+  "Mg",
+  "Al",
+  "Si",
+  "P",
+  "S",
+  "Cl",
+  "Ar",
+  "K",
+  "Ca",
+  "Fe",
+  "Cu",
+  "Zn",
+  "Ag",
+  "Au",
+  "Hg",
+  "Pb",
+  "Sn",
+  "Ni",
+  "Cr",
+  "Mn",
+  "Ba",
+  "I",
+]);
+const NON_CHEM_WORD =
+  /^(class|chapter|room|grade|unit|lesson|page|step|part|week|day|year|group|team|level|round|case|figure|act|scene|song|std|standard|phone|pin)\d*$/i;
+
+const toSubscript = (d: string): string =>
+  [...d].map((ch) => SUB[ch as keyof typeof SUB] ?? ch).join("");
+
+/**
+ * §5 helper — split a formula at TOP-LEVEL (bracket-depth-0) operator matches.
+ * keepWithNext=false → the operator ends the previous chunk ("a + b ="),
+ * keepWithNext=true → the operator leads the next chunk ("+ c"). Brackets,
+ * braces and nested groups are never split.
+ */
+function splitDepth0(src: string, isCut: (ch: string) => boolean, keepWithNext: boolean): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (ch === "(" || ch === "{") depth++;
+    else if (ch === ")" || ch === "}") depth--;
+    else if (depth === 0 && isCut(ch) && i > start) {
+      if (keepWithNext) {
+        parts.push(src.slice(start, i).trim());
+        start = i;
+      } else {
+        parts.push(src.slice(start, i + 1).trim());
+        start = i + 1;
+      }
+    }
+  }
+  parts.push(src.slice(start).trim());
+  return parts.filter((p) => p.length > 0);
+}
+
+/** Title strip a titled diagram reserves ABOVE its drawing inside its box. */
+const DIAGRAM_TITLE_PAD = 44;
+
+/**
+ * §16/§17 — REAL intrinsic size of a diagram: shapes, labels, graph rows and
+ * title included. The declared item box is derived from this (never a blind
+ * "460×470"), and paint scales the drawing to fit the declared box exactly.
+ */
+function diagramIntrinsicSize(
+  ctx: CanvasRenderingContext2D,
+  kind: DiagramKind,
+  title?: string | undefined,
+  data?: number[] | undefined,
+  labels?: string[] | undefined,
+): { w: number; h: number } {
+  ctx.font = `500 30px ${FONT_STACK}`;
+  const labelW = (s: string) => ctx.measureText(s).width;
+  let w: number;
+  let h: number;
+  const safeData = (data ?? []).filter((v) => Number.isFinite(v));
+  switch (kind) {
+    case "bar": {
+      const n = Math.max(1, safeData.length || 5);
+      w = (n - 1) * 110 + 74 + 30;
+      h = 440;
+      break;
+    }
+    case "line": {
+      const n = Math.max(1, safeData.length || 5);
+      w = (n - 1) * 110 + 50;
+      h = 420;
+      break;
+    }
+    case "cycle":
+      w = 560;
+      h = 440;
+      break;
+    case "atom":
+      w = 430;
+      h = 430;
+      break;
+    case "triangle":
+      w = 500;
+      h = 440;
+      break;
+    case "photosynthesis":
+      w = 540;
+      h = 440;
+      break;
+    default: {
+      // generic: label columns must fit INSIDE the box (long/Hindi labels measured)
+      const maxRows = Math.max(1, Math.floor(280 / 48));
+      const n = Math.max(1, (labels ?? []).length);
+      const cols = Math.ceil(n / maxRows);
+      const widest = (labels ?? []).reduce((a, l) => Math.max(a, labelW(l)), 130);
+      w = 16 + cols * 180 + widest + 20;
+      h = 350;
+    }
+  }
+  return { w: w + 20, h: h + (title ? DIAGRAM_TITLE_PAD : 0) + 20 };
+}
+
+/**
+ * Board notation engine — a teacher never writes raw LaTeX on a board, so
+ * LaTeX/ASCII math is converted to real board notation before it is written.
+ * (Used for plain text lines and for narration; true 2D math goes through the
+ * typesetter in ./mathtype.)
+ */
+export function mathify(raw: string): string {
+  let s = raw;
+  s = s.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
+  s = s.replace(/\\sqrt\s*\{([^{}]+)\}/g, "√($1)");
+  s = s.replace(/\\(times|cdot)\b/g, "×").replace(/\\div\b/g, "÷");
+  s = s.replace(/\\(rightarrow|to|Rightarrow)\b/g, "→").replace(/->/g, "→");
+  s = s.replace(/\\(alpha|beta|theta|pi|lambda|mu|omega|Delta|delta|sum)\b/g, (_m, g: string) => {
+    const map: Record<string, string> = {
+      alpha: "α",
+      beta: "β",
+      theta: "θ",
+      pi: "π",
+      lambda: "λ",
+      mu: "μ",
+      omega: "ω",
+      Delta: "Δ",
+      delta: "δ",
+      sum: "Σ",
+    };
+    return map[g] ?? g;
+  });
+  s = s.replace(/\\(left|right|text|mathrm|displaystyle)\b/g, "").replace(/[{}$]/g, "");
+  // exponents: x^2 → x², and chemical subscripts: H2O → H₂O, CO2 → CO₂
+  s = s.replace(/\^\(?(-?\d+)\)?/g, (_m, d: string) =>
+    [...d].map((ch) => (ch === "-" ? "⁻" : (SUP[ch as keyof typeof SUP] ?? ch))).join(""),
+  );
+  s = s.replace(/_\(?(\d+)\)?/g, (_m, d: string) =>
+    [...d].map((ch) => SUB[ch as keyof typeof SUB] ?? ch).join(""),
+  );
+  // §10: subscript ONLY genuine chemical notation — element symbols from the
+  // whitelist (with optional leading coefficient), never Class2/Chapter2/Room2.
+  s = s.replace(/\b([A-Za-z0-9]+)\b/g, (w: string): string => {
+    if (NON_CHEM_WORD.test(w) || w.length > 16 || !/\d/.test(w)) return w;
+    const lead = /^\d+/.exec(w)?.[0] ?? "";
+    const body = w.slice(lead.length);
+    if (!body || !/^([A-Z][a-z]?\d*)+$/.test(body)) return w;
+    const parts = body.match(/[A-Z][a-z]?\d*/g) ?? [];
+    if (!parts.length || !parts.every((p) => CHEM_ELEMENTS.has(p.replace(/\d+$/, "")))) return w;
+    return lead + parts.map((p) => p.replace(/(\d+)$/g, toSubscript)).join("");
+  });
+  s = s.replace(/\bdeg\b|°C\b/g, (m) => (m === "deg" ? "°" : m));
+  return s.replace(/\s{2,}/g, " ").trim();
+}
+
+export class BoardEngine {
+  readonly mesh: THREE.Mesh;
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private texture: THREE.CanvasTexture;
+  private items: Item[] = [];
+  private archived: Item[] = [];
+  private nextId = 1;
+  private nextZ = 1;
+  private dirty = true;
+  /** repaint accumulator for the 30 Hz animation cadence */
+  private paintAcc = 0;
+  onChalk?: () => void;
+  /** fires with the live pen tip (canvas px) so the teacher's hand can follow the writing */
+  onPenMove?: (u: number, v: number) => void;
+  /** fires when every pending stroke has been written (timeline gate releases) */
+  onWriteEnd?: () => void;
+  private wasBusy = false;
+  /**
+   * READABILITY ENGINE (§11–§13) — board text quality is deliberately INDEPENDENT
+   * of the 3D quality tier. Lowering 3D quality reduces shadows, post-fx and
+   * decorative textures, never the sharpness or size of what is taught.
+   */
+  private minSize = 46;
+  private sizeScale = 1;
+
+  constructor(maxAnisotropy = 8) {
+    this.canvas = document.createElement("canvas");
+    this.canvas.width = W;
+    this.canvas.height = H;
+    this.ctx = this.canvas.getContext("2d")!;
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.colorSpace = THREE.SRGBColorSpace;
+    // Always max sharpness: the board texture never follows the quality tier.
+    this.texture.anisotropy = Math.max(8, maxAnisotropy);
+    this.texture.generateMipmaps = true;
+    this.texture.minFilter = THREE.LinearMipmapLinearFilter;
+    this.texture.magFilter = THREE.LinearFilter;
+
+    // The board is the focal teaching surface, hung at real human writing height.
+    const geo = new THREE.PlaneGeometry(SURFACE_W, SURFACE_H);
+    const mat = new THREE.MeshStandardMaterial({
+      map: this.texture,
+      roughness: 0.42,
+      metalness: 0.02,
+      emissive: new THREE.Color(0x0b1b18),
+      emissiveIntensity: 0.22,
+    });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.position.set(0, SURFACE_Y, SURFACE_Z);
+    this.mesh.receiveShadow = true;
+    this.mesh.name = "board";
+    this.paint();
+  }
+
+  /**
+   * Viewport-aware typography (§13). Small/portrait screens and long camera
+   * distances get a LARGER minimum glyph size, never a smaller one. When content
+   * no longer fits, the layout engine pages/archives instead of shrinking text.
+   */
+  setViewport(width: number, height: number, portrait: boolean): void {
+    const short = Math.max(320, Math.min(width, height));
+    // 46px on a large desktop stage, up to 64px on a small phone stage
+    const floor = portrait ? 58 : 46;
+    const bump = short < 480 ? 10 : short < 720 ? 6 : 0;
+    const minSize = floor + bump;
+    const sizeScale = portrait ? 1.14 : 1;
+    // Resize guard: only re-layout (and repaint) when the typography actually
+    // changes — ResizeObserver ticks must not cause repeated canvas repaints.
+    if (minSize === this.minSize && sizeScale === this.sizeScale) return;
+    this.minSize = minSize;
+    this.sizeScale = sizeScale;
+    this.dirty = true;
+  }
+
+  /**
+   * Quality hook. Decorative response only — the board keeps full-resolution text
+   * and simply brightens its own emissive so it stays crisp when scene lighting
+   * and post-processing are reduced.
+   */
+  setQuality(q: "low" | "medium" | "high"): void {
+    const mat = this.mesh.material as THREE.MeshStandardMaterial;
+    mat.emissiveIntensity = q === "low" ? 0.34 : q === "medium" ? 0.28 : 0.22;
+    mat.needsUpdate = true;
+  }
+
+  /** World size of the writing surface — used by camera framing and teacher IK. */
+  get surface(): { width: number; height: number } {
+    return { width: SURFACE_W, height: SURFACE_H };
+  }
+
+  /** True while any element is still being written/drawn — gates the timeline. */
+  get busy(): boolean {
+    return this.items.some((i) => i.reveal < 1);
+  }
+
+  /** Canvas px → world point on the board (for hand IK / pen tracking). */
+  pointToWorld(x: number, y: number, out: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
+    const { width, height } = this.surface;
+    return out.set(
+      this.mesh.position.x + (x / W - 0.5) * width,
+      this.mesh.position.y + (0.5 - y / H) * height,
+      this.mesh.position.z + 0.08,
+    );
+  }
+
+  /* ---------------- layout engine ---------------- */
+
+  private measure(lines: string[], size: number): number {
+    const c = this.ctx;
+    c.font = `600 ${size}px ${FONT_STACK}`;
+    return Math.max(...lines.map((l) => c.measureText(l).width), 10);
+  }
+
+  private wrap(text: string, size: number, maxW: number): string[] {
+    const c = this.ctx;
+    c.font = `600 ${size}px ${FONT_STACK}`;
+    const fits = (s: string) => c.measureText(s).width <= maxW;
+    const lines: string[] = [];
+    let line = "";
+    const push = () => {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+    };
+    for (const word of text.split(/\s+/)) {
+      if (!word) continue;
+      // §6: a single token wider than the whole line (URL, huge formula, long
+      // unbroken string) is EMERGENCY-SPLIT at character level — content is
+      // never lost and never escapes the board.
+      if (!fits(word)) {
+        push();
+        let chunk = "";
+        for (const ch of Array.from(word)) {
+          const attempt = chunk + ch;
+          if (chunk && !fits(attempt)) {
+            lines.push(chunk);
+            chunk = ch;
+          } else chunk = attempt;
+        }
+        line = chunk;
+        continue;
+      }
+      const attempt = line ? `${line} ${word}` : word;
+      if (!fits(attempt) && line) {
+        push();
+        line = word;
+      } else line = attempt;
+    }
+    push();
+    return lines.length ? lines : [text];
+  }
+
+  /**
+   * SAFE-WORD-WRAP LAYOUT (§8–§11). Never truncates teaching content: it word-wraps
+   * inside a max width, then — if the wrapped lines would overflow the region's
+   * height — it shrinks the font size down to the engine's authoritative
+   * readability floor (this.minSize), never below. If it still cannot fit at the
+   * floor, the caller archives content / starts a new phase rather than drawing
+   * at an unreadable size or overlapping two items.
+   */
+  private layoutText(
+    text: string,
+    size: number,
+    maxW: number,
+    maxH: number,
+  ): { lines: string[]; size: number; fits: boolean } {
+    const floor = this.minSize; // ONE authoritative minimum (Section 17)
+    let s = Math.max(floor, size);
+    let lines = this.wrap(text, s, maxW);
+    while (s > floor) {
+      const h = lines.length * lineH(s) + 16;
+      if (h <= maxH) return { lines, size: s, fits: true };
+      s = Math.max(floor, s - 4);
+      lines = this.wrap(text, s, maxW);
+    }
+    const h = lines.length * lineH(s) + 16;
+    return { lines, size: s, fits: h <= maxH };
+  }
+
+  /**
+   * EFFECTIVE rendered bounds (§2A/§23/§24). x/y/w/h are the base box at scale
+   * 1; the rendered box is base × scale, grown by highlight/circle overhang.
+   * ALL collision + placement tests use this — never the base rect.
+   */
+  private rectOf(i: Item): { x: number; y: number; w: number; h: number } {
+    const w = i.w * i.scale;
+    const h = i.h * i.scale;
+    let x0 = i.x;
+    let y0 = i.y;
+    let x1 = i.x + w;
+    let y1 = i.y + h;
+    if (i.circled) {
+      // ellipse(cx i.w/2-6, cy i.h/2, rx i.w/2+20, ry i.h/2+14) overhangs the box
+      x0 -= 26 * i.scale;
+      y0 -= 14 * i.scale;
+      x1 += 14 * i.scale;
+      y1 += 14 * i.scale;
+    } else if (i.highlight) {
+      // highlight rect starts at (-12, -8)
+      x0 -= 12 * i.scale;
+      y0 -= 8 * i.scale;
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  private overlaps(a: { x: number; y: number; w: number; h: number }, b: Item): boolean {
+    const r = this.rectOf(b);
+    return !(
+      a.x + a.w + PAD <= r.x ||
+      r.x + r.w + PAD <= a.x ||
+      a.y + a.h + PAD <= r.y ||
+      r.y + r.h + PAD <= a.y
+    );
+  }
+
+  /** Find non-overlapping space for a box inside the candidate regions of a role. */
+  private place(
+    role: BoardRole,
+    w: number,
+    h: number,
+  ): { x: number; y: number; region: string } | null {
+    for (const name of ROLE_REGION[role]) {
+      const r = REGIONS[name];
+      if (!r) continue;
+      const stepY = 12;
+      for (let y = r.y; y + h <= r.y + r.h + 1; y += stepY) {
+        for (let x = r.x; x + w <= r.x + r.w + 1; x += 40) {
+          const box = { x, y, w, h };
+          if (!this.items.some((i) => this.overlaps(box, i))) return { x, y, region: name };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Board full → archive the OLDEST non-title content (§25). Items are kept
+   * z-ordered (= creation order). The ACTIVE handwriting stroke (the first
+   * unfinished item) is NEVER archived, and callers may protect additional
+   * items (e.g. sibling chunks written by the same semantic op).
+   */
+  private makeRoom(protect: readonly Item[] = []): void {
+    const active = this.items.find((i) => i.reveal < 1);
+    const eligible = this.items.filter(
+      (i) => i.role !== "title" && i !== active && !protect.includes(i),
+    );
+    // prefer fully-written content, then the oldest queued item
+    const victim = eligible.find((i) => i.reveal >= 1) ?? eligible[0];
+    if (!victim) return;
+    this.items = this.items.filter((i) => i !== victim);
+    this.archived.push(victim);
+  }
+
+  /**
+   * AUTHORITATIVE placement (§3): the layout engine owns x/y/region. Callers
+   * supply ONLY the semantic content and its measured w/h — stale caller
+   * coordinates cannot influence placement, and after placement x, y, w, h,
+   * region and scale all describe the SAME actual rendered object.
+   */
+  private add(
+    partial: Omit<Item, "id" | "z" | "reveal" | "scale" | "x" | "y" | "region">,
+    protect: readonly Item[] = [],
+  ): Item {
+    let spot = this.place(partial.role, partial.w, partial.h);
+    let guard = 0;
+    while (!spot && guard++ < 16) {
+      this.makeRoom(protect);
+      spot = this.place(partial.role, partial.w, partial.h);
+    }
+    if (!spot) {
+      // Whole board exhausted even after archiving — clear non-protected
+      // content and place at the region origin, which is guaranteed inside
+      // the safe area. The active stroke and explicitly protected siblings
+      // (chunks/pages of the SAME semantic op) are never destroyed here.
+      const active = this.items.find((i) => i.reveal < 1);
+      const keep = new Set<Item>(protect);
+      if (active) keep.add(active);
+      this.items = this.items.filter((i) => i.role === "title" || keep.has(i));
+      spot = this.place(partial.role, partial.w, partial.h) ?? {
+        x: REGIONS[ROLE_REGION[partial.role][0] ?? "concept"]!.x,
+        y: REGIONS[ROLE_REGION[partial.role][0] ?? "concept"]!.y,
+        region: ROLE_REGION[partial.role][0] ?? "concept",
+      };
+    }
+    const item: Item = {
+      ...partial,
+      x: spot.x,
+      y: spot.y,
+      region: spot.region,
+      id: this.nextId++,
+      z: this.nextZ++,
+      scale: 1,
+      reveal: 0,
+    };
+    this.items.push(item);
+    this.items.sort((a, b) => a.z - b.z);
+    return item;
+  }
+
+  /** Measure + add ONE math item at a proven size (called only when it fits). */
+  private addMath(src: string, role: BoardRole, ms: number, protect: readonly Item[] = []): Item {
+    const nodes = parseMath(src);
+    const box = measureMath(this.ctx, nodes, ms, FONT_STACK);
+    const item = this.add(
+      {
+        kind: "math",
+        role,
+        w: box.width + 32,
+        h: box.asc + box.desc + 20,
+        math: nodes,
+        mathInk: box.ink,
+        mathAsc: box.asc + 8,
+        text: src,
+        size: ms,
+        color: "#ffe6b0",
+        language: "en",
+        writeMs: Math.max(1200, writeDurationMs(src, ms)),
+      },
+      protect,
+    );
+    this.onChalk?.();
+    return item;
+  }
+
+  /** Does `src` fit its role's primary region at size `ms`? (§5 measure-first) */
+  private mathFits(src: string, role: BoardRole, ms: number): boolean {
+    const box = measureMath(this.ctx, parseMath(src), ms, FONT_STACK);
+    const region = REGIONS[ROLE_REGION[role][0] ?? "formula"]!;
+    return box.width + 32 <= region.w - 20 && box.asc + box.desc + 20 <= region.h - 20;
+  }
+
+  /** Largest size ≥ the readability floor at which `src` fits its region. */
+  private mathFitSize(src: string, role: BoardRole, baseSize: number): number {
+    let ms = Math.max(this.minSize, baseSize);
+    while (ms > this.minSize && !this.mathFits(src, role, ms)) {
+      ms = Math.max(this.minSize, ms - 4);
+    }
+    return ms;
+  }
+
+  /**
+   * Math placement engine (§4/§5): measure → shrink to the readability floor →
+   * archive old content and retry → and ONLY then paginate semantically by
+   * splitting at top-level `=` (the operator ends the line) and top-level
+   * `+`/`-` terms (the operator leads the continuation line). Every chunk is
+   * re-measured, re-fitted and collision-placed — an oversized formula is never
+   * silently shrunk into unreadability, clipped or overlapped.
+   */
+  private writeMath(
+    src: string,
+    role: BoardRole,
+    baseSize: number,
+    protect: readonly Item[] = [],
+  ): void {
+    let ms = this.mathFitSize(src, role, baseSize);
+    if (!this.mathFits(src, role, ms)) {
+      this.makeRoom(protect);
+      ms = this.mathFitSize(src, role, baseSize);
+    }
+    if (this.mathFits(src, role, ms)) {
+      this.addMath(src, role, ms, protect);
+      return;
+    }
+    // Semantic pagination (§5): split at depth-0 '=' first (keeping '=' with
+    // the left side), then at '+/-' (keeping the operator with the left term).
+    // Each chunk recurses, so a still-oversized chunk deepens the split until
+    // every piece fits at the readability floor — no token is ever dropped.
+    const eqParts = splitDepth0(src, (ch) => ch === "=", false);
+    const chunks =
+      eqParts.length > 1 ? eqParts : splitDepth0(src, (ch) => ch === "+" || ch === "-", true);
+    if (chunks.length <= 1) {
+      // Un-splittable at floor: place at the region origin as the last resort
+      // (protected siblings are preserved — nothing is silently destroyed).
+      this.addMath(src, role, ms, protect);
+      return;
+    }
+    const siblings: Item[] = [...protect]; // chunks of THIS op protect each other
+    for (const chunk of chunks) this.writeMath(chunk, role, baseSize, siblings);
+  }
+
+  /**
+   * Text placement engine (§2B/§6): wrap → shrink to the readability floor →
+   * archive and retry → and ONLY then paginate semantically (sentence
+   * boundaries first, word boundaries second). Every page is collision-placed;
+   * text is never shrunk into unreadability, clipped or overlapped, and no
+   * character is ever dropped.
+   */
+  private writeText(
+    text: string,
+    role: BoardRole,
+    size: number,
+    protect: readonly Item[] = [],
+  ): void {
+    const region = REGIONS[ROLE_REGION[role][0] ?? "concept"]!;
+    const layout = (): { lines: string[]; size: number; fits: boolean } =>
+      this.layoutText(text, size, region.w - 40, region.h - 20);
+    let fitted = layout();
+    if (!fitted.fits) {
+      this.makeRoom(protect);
+      fitted = layout();
+    }
+    if (fitted.fits) {
+      const w = this.measure(fitted.lines, fitted.size) + 24;
+      const h = fitted.lines.length * lineH(fitted.size) + 16;
+      this.add({
+        kind: "text",
+        role,
+        w,
+        h,
+        lines: fitted.lines,
+        text,
+        size: fitted.size,
+        color: role === "title" ? "#ffe6b0" : "#f4f7ff",
+        language: detectLang(text),
+        writeMs: writeDurationMs(text, fitted.size),
+      });
+      this.onChalk?.();
+      return;
+    }
+    // §2B semantic pagination — the whole text cannot fit ANY region even at
+    // the readability floor. Split at sentence ends (। . ! ?), else at a
+    // mid word boundary, and write each page in turn.
+    const sentences = text.split(/(?<=[।.!?])\s+/).filter((s) => s.trim().length > 0);
+    const pages =
+      sentences.length > 1 ? this.balancePages(sentences) : this.splitAtWordBoundary(text);
+    const siblings: Item[] = [];
+    for (const page of pages) {
+      this.writeText(page, role, size, siblings);
+    }
+  }
+
+  /** Greedy sentence packing into pages that each fit their role region. */
+  private balancePages(sentences: string[]): string[] {
+    const pages: string[] = [];
+    let current = "";
+    for (const s of sentences) {
+      const candidate = current ? `${current} ${s}` : s;
+      const fits = this.layoutText(
+        candidate,
+        this.minSize,
+        REGIONS["concept"]!.w - 40,
+        REGIONS["concept"]!.h - 20,
+      ).fits;
+      if (current && !fits) {
+        pages.push(current);
+        current = s;
+      } else current = candidate;
+    }
+    if (current) pages.push(current);
+    return pages.length > 1 ? pages : sentences;
+  }
+
+  /** Split a single unbreakable text block at a word boundary near the middle. */
+  private splitAtWordBoundary(text: string): string[] {
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) {
+      // One token wider than every region (URL, huge formula, long unbroken
+      // string): halve at CHARACTER level — every page is strictly shorter,
+      // recursion terminates, and no character is ever dropped (§6).
+      const chars = Array.from(text);
+      if (chars.length <= 1) return [text];
+      const mid = Math.ceil(chars.length / 2);
+      return [chars.slice(0, mid).join(""), chars.slice(mid).join("")];
+    }
+    const mid = Math.ceil(words.length / 2);
+    return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")].filter((p) => p.length > 0);
+  }
+
+  /** Apply one semantic board operation. */
+  apply(op: BoardOp): void {
+    switch (op.op) {
+      case "write": {
+        // readability floor — never shrink teaching text below a legible size
+        const size = Math.round(Math.max(this.minSize, (op.size ?? 60) * this.sizeScale));
+
+        /**
+         * Real 2D math (fractions, roots, powers, subscripts) is typeset and
+         * written progressively instead of being flattened into one text line.
+         */
+        if (needsMathLayout(op.text)) {
+          this.writeMath(symbolize(op.text), op.role ?? "formula", size);
+          break;
+        }
+
+        this.writeText(mathify(op.text), op.role ?? roleOf(mathify(op.text), size), size);
+        break;
+      }
+      case "update": {
+        const last = [...this.items].reverse().find((i) => i.kind === "text");
+        if (last && last.size) {
+          const text = mathify(op.text);
+          const region = REGIONS[last.region];
+          const { lines, size: fittedSize } = this.layoutText(
+            text,
+            last.size,
+            (region?.w ?? 1240) - 40,
+            (region?.h ?? 370) - 20,
+          );
+          last.text = text;
+          last.size = fittedSize;
+          last.lines = lines;
+          last.w = this.measure(last.lines, last.size) + 24;
+          last.h = last.lines.length * lineH(last.size) + 16;
+          last.language = detectLang(text);
+          last.writeMs = writeDurationMs(text, last.size);
+          last.reveal = 0;
+        } else this.apply({ op: "write", text: op.text });
+        break;
+      }
+      case "highlight": {
+        const t =
+          this.items.find((i) => i.kind === "text" && i.text === op.text) ?? this.lastText();
+        if (t) t.highlight = true;
+        break;
+      }
+      case "underline": {
+        const t = op.text ? this.items.find((i) => i.text === op.text) : this.lastText();
+        if (t) t.underline = true;
+        break;
+      }
+      case "circle": {
+        const t = op.target ? this.items.find((i) => i.text === op.target) : this.lastText();
+        if (t) t.circled = true;
+        break;
+      }
+      case "draw": {
+        if (!op.points.length) break;
+        const xs = op.points.map((p) => p[0]);
+        const ys = op.points.map((p) => p[1]);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        // §21: bbox = point extents + stroke width 8 + round caps + margin
+        const item = this.add({
+          kind: "path",
+          role: "diagram",
+          w: Math.max(...xs) - minX + 28,
+          h: Math.max(...ys) - minY + 28,
+          points: op.points,
+          color: "#7fe3d4",
+          language: "en",
+          writeMs: 600 + op.points.length * 60,
+        });
+        // §3/§14: translate the geometry INTO the placed box so x/y/w/h describe
+        // the actual rendered stroke — collision bounds == rendered pixels.
+        const dx = item.x + 14 - minX;
+        const dy = item.y + 14 - minY;
+        if (dx || dy) item.points = op.points.map(([px, py]) => [px + dx, py + dy]);
+        break;
+      }
+      case "arrow": {
+        const [fx, fy] = op.from;
+        const [tx, ty] = op.to;
+        // §20: bounds from BOTH endpoints (delta extents, never Math.abs(tx)!),
+        // plus stroke width 8, arrowhead 26 and margin — the tail and head are
+        // stored RELATIVE to the item origin so the box contains the whole arrow.
+        const w = Math.abs(tx - fx) + 46;
+        const h = Math.abs(ty - fy) + 46;
+        const item = this.add({
+          kind: "arrow",
+          role: "mark",
+          w,
+          h,
+          color: "#ffd489",
+          language: "en",
+          writeMs: 900,
+        });
+        const tail: [number, number] = [
+          tx >= fx ? 23 : 23 + (w - 46),
+          ty >= fy ? 23 : 23 + (h - 46),
+        ];
+        item.from = tail;
+        item.to = [tail[0] + (tx - fx), tail[1] + (ty - fy)];
+        break;
+      }
+      case "diagram": {
+        // §16: the declared box is the REAL rendered size (shapes + labels +
+        // title), capped to the diagram region; paint scales to fit it exactly.
+        const intrinsic = diagramIntrinsicSize(this.ctx, op.kind, op.title, op.data, op.labels);
+        const r = REGIONS["diagram"]!;
+        this.add({
+          kind: "diagram",
+          role: "diagram",
+          w: Math.min(intrinsic.w, r.w - 20),
+          h: Math.min(intrinsic.h, r.h - 20),
+          color: "#7fe3d4",
+          language: "en",
+          diagram: { kind: op.kind, title: op.title, data: op.data, labels: op.labels },
+          writeMs: 4200,
+        });
+        break;
+      }
+      case "erase": {
+        if (!op.region) {
+          const gone = this.items.pop();
+          if (gone) this.archived.push(gone);
+        } else {
+          const [x, y, w, h] = op.region;
+          const keep: Item[] = [];
+          for (const i of this.items) {
+            if (this.overlaps({ x, y, w, h }, i)) this.archived.push(i);
+            else keep.push(i);
+          }
+          this.items = keep;
+        }
+        break;
+      }
+      case "move": {
+        // §22: a semantic move targets ONLY the matching item(s) via op.target;
+        // without a target it is an explicit whole-board move. Either way items
+        // are clamped so nothing can be pushed off the board.
+        const targets = op.target ? this.items.filter((i) => i.text === op.target) : this.items;
+        for (const i of targets) {
+          const w = i.w * i.scale;
+          const h = i.h * i.scale;
+          i.x = THREE.MathUtils.clamp(i.x + op.dx, 0, Math.max(0, W - w));
+          i.y = THREE.MathUtils.clamp(i.y + op.dy, 0, Math.max(0, H - h));
+        }
+        break;
+      }
+      case "resize": {
+        // §23: scale is finite/positive, effective bounds rescale (rectOf uses
+        // scale), text never shrinks below the readability floor, and scaled
+        // items are re-clamped so they stay inside the board.
+        const s = op.scale;
+        if (!Number.isFinite(s) || s <= 0) break;
+        for (const i of this.items) {
+          const floor = i.size ? Math.max(0.3, this.minSize / i.size) : 0.3;
+          const next = THREE.MathUtils.clamp(i.scale * s, floor, 3);
+          if (next === i.scale) continue;
+          i.scale = next;
+          const w = i.w * next;
+          const h = i.h * next;
+          i.x = THREE.MathUtils.clamp(i.x, 0, Math.max(0, W - w));
+          i.y = THREE.MathUtils.clamp(i.y, 0, Math.max(0, H - h));
+        }
+        break;
+      }
+      case "clear":
+        this.archived.push(...this.items);
+        this.items = [];
+        break;
+    }
+    this.dirty = true;
+  }
+
+  /** Deterministic, serialisable snapshot of the full semantic board (§25). */
+  snapshot(): BoardSnapshot {
+    return {
+      version: 1,
+      items: this.items.map((i) => ({
+        id: i.id,
+        kind: i.kind,
+        role: i.role,
+        region: i.region,
+        x: i.x,
+        y: i.y,
+        w: i.w,
+        h: i.h,
+        z: i.z,
+        scale: i.scale,
+        reveal: i.reveal,
+        ...(i.text ? { text: i.text } : {}),
+        ...(i.lines ? { lines: i.lines } : {}),
+        ...(i.size ? { size: i.size } : {}),
+        ...(i.color ? { color: i.color } : {}),
+        ...(i.points ? { points: i.points } : {}),
+        ...(i.to ? { to: i.to } : {}),
+        ...(i.from ? { from: i.from } : {}),
+        ...(i.diagram ? { diagram: i.diagram } : {}),
+        ...(i.highlight ? { highlight: true } : {}),
+        ...(i.underline ? { underline: true } : {}),
+        ...(i.circled ? { circled: true } : {}),
+        ...(i.math ? { hasMath: true } : {}),
+      })),
+      viewport: { minSize: this.minSize, sizeScale: this.sizeScale },
+    };
+  }
+
+  /**
+   * Reconstruct the board from a snapshot. Math is rebuilt from its serialised
+   * source (deterministic — never a screenshot), geometry is stored relative to
+   * each item origin so collision state survives exactly (§26/§28–§31), and new
+   * content never reuses restored ids/z-order. Returns false when the snapshot
+   * is unusable so the caller can replay the lesson's board ops instead.
+   */
+  restore(snap: BoardSnapshot): boolean {
+    if (!snap || !Array.isArray(snap.items)) return false;
+    this.items = [];
+    this.archived = [];
+    this.nextId = 1;
+    this.nextZ = 1;
+    if (snap.viewport) {
+      this.minSize = snap.viewport.minSize;
+      this.sizeScale = snap.viewport.sizeScale;
+    }
+    for (const it of snap.items) {
+      const item: Item = {
+        id: it.id,
+        kind: it.kind,
+        role: it.role,
+        region: it.region,
+        x: it.x,
+        y: it.y,
+        w: it.w,
+        h: it.h,
+        z: it.z,
+        scale: it.scale,
+        reveal: 1, // restored content is already fully written
+        color: it.color ?? "#f4f7ff",
+        language: it.text ? detectLang(it.text) : "en",
+        writeMs: 0,
+        ...(it.text ? { text: it.text } : {}),
+        ...(it.lines ? { lines: it.lines } : {}),
+        ...(it.size ? { size: it.size } : {}),
+        ...(it.points ? { points: it.points } : {}),
+        ...(it.to ? { to: it.to } : {}),
+        ...(it.from ? { from: it.from } : {}),
+        ...(it.diagram ? { diagram: it.diagram } : {}),
+        ...(it.highlight ? { highlight: true } : {}),
+        ...(it.underline ? { underline: true } : {}),
+        ...(it.circled ? { circled: true } : {}),
+      };
+      // §28: math items are rebuilt DETERMINISTICALLY from their serialised
+      // source (parseMath + measureMath are pure) so a restored formula renders
+      // immediately with identical layout, ink budget and baseline.
+      if (it.kind === "math" && it.text) {
+        const ms = it.size ?? 60;
+        const nodes = parseMath(it.text);
+        const box = measureMath(this.ctx, nodes, ms, FONT_STACK);
+        item.math = nodes;
+        item.mathInk = box.ink;
+        item.mathAsc = box.asc + 8;
+      }
+      // Legacy tolerance: pre-fix snapshots stored an ABSOLUTE arrow head with
+      // no tail — convert so the arrow still draws exactly where it used to.
+      if (it.kind === "arrow" && it.to && !it.from) {
+        item.from = [0, 0];
+        item.to = [it.to[0] - it.x, it.to[1] - it.y];
+      }
+      this.items.push(item);
+      this.nextId = Math.max(this.nextId, it.id + 1);
+      this.nextZ = Math.max(this.nextZ, it.z + 1);
+    }
+    this.items.sort((a, b) => a.z - b.z);
+    this.dirty = true;
+    return true;
+  }
+
+  private lastText(): Item | undefined {
+    return [...this.items].reverse().find((i) => i.kind === "text" || i.kind === "math");
+  }
+
+  /**
+   * Handwriting engine. Each element advances at its OWN content-driven rate
+   * (a long Hindi sentence takes far longer than a two-word label), and the pen
+   * tip is the real position of the glyph currently being formed — that exact
+   * point is what the teacher's hand IK follows, so hand and writing can never
+   * drift apart. Only one element is written at a time, like a real teacher.
+   */
+  update(dt: number): void {
+    let animating = false;
+    const pending = this.items.find((i) => i.reveal < 1);
+    if (pending) {
+      animating = true;
+      const seconds = Math.max(0.25, pending.writeMs / 1000);
+      pending.reveal = Math.min(1, pending.reveal + dt / seconds);
+      const tip = this.penTip(pending);
+      if (tip) this.onPenMove?.(tip[0], tip[1]);
+      // §44: the timeline gate flips in the SAME frame the final stroke lands —
+      // onWriteEnd is atomic with busy→idle (never early, never twice, never a
+      // frame late), so voice/writing/hand can never desynchronise by one beat.
+      if (!this.items.some((i) => i.reveal < 1)) {
+        this.wasBusy = false;
+        this.paint();
+        this.paintAcc = 0;
+        this.onWriteEnd?.();
+      }
+    }
+    if (!pending && this.wasBusy) {
+      this.onWriteEnd?.();
+      // commit the final, fully-written frame immediately
+      this.paint();
+      this.paintAcc = 0;
+    }
+    this.wasBusy = Boolean(pending);
+
+    for (const i of this.items) if (i.reveal < 1 && i !== pending) animating = true;
+    if (this.dirty) {
+      // one-shot ops (write/clear/restore/viewport) repaint immediately
+      this.paint();
+      this.dirty = false;
+      this.paintAcc = 0;
+    } else if (animating) {
+      // PERF: while strokes animate, cap the repaint + GPU texture re-upload
+      // (full 2560×880 canvas + mipmap regeneration) at 30 Hz. Handwriting is
+      // slow, so this is visually identical, but it removes the multi-hundred-ms
+      // main-thread blocks a 60 Hz re-upload caused on mobile GPUs.
+      this.paintAcc += dt;
+      if (this.paintAcc >= PAINT_INTERVAL) {
+        this.paint();
+        this.paintAcc = 0;
+      }
+    }
+  }
+
+  /** Exact canvas-space position of the stroke being drawn right now. */
+  private penTip(i: Item): [number, number] | null {
+    if (i.kind === "math") return i.tip ?? [i.x, i.y + (i.mathAsc ?? 0)];
+    if (i.kind === "text" && i.lines?.length && i.size) {
+      const lh = lineH(i.size);
+      // §12: progress counted in grapheme clusters — Devanagari matras, emoji
+      // and ligatures never pull the hand ahead of the visible glyphs.
+      const starts = i.lines.map((l) => clusterStarts(l));
+      const total = starts.reduce((a, s) => a + s.length, 0) || 1;
+      let shown = Math.ceil(total * i.reveal);
+      for (let k = 0; k < i.lines.length; k++) {
+        const line = i.lines[k]!;
+        const cnt = starts[k]!.length;
+        if (shown <= cnt) {
+          // boundary = end of the last COMPLETED cluster (start of the next one)
+          const boundary = shown >= cnt ? line.length : (starts[k]![shown] ?? line.length);
+          this.ctx.font = `600 ${i.size}px ${FONT_STACK}`;
+          const w = this.ctx.measureText(line.slice(0, Math.max(0, boundary))).width;
+          return [i.x + w, i.y + k * lh + i.size * 0.6];
+        }
+        shown -= cnt;
+      }
+      return [i.x + i.w, i.y + (i.lines.length - 1) * lh + i.size * 0.6];
+    }
+    if (i.kind === "path" && i.points?.length) {
+      const idx = Math.min(i.points.length - 1, Math.floor((i.points.length - 1) * i.reveal));
+      const p = i.points[idx]!;
+      return [p[0], p[1]];
+    }
+    if (i.kind === "arrow" && i.to) {
+      const bx = i.from?.[0] ?? 0;
+      const by = i.from?.[1] ?? 0;
+      return [i.x + bx + (i.to[0] - bx) * i.reveal, i.y + by + (i.to[1] - by) * i.reveal];
+    }
+    if (i.kind === "diagram") {
+      // hand sweeps across the diagram box while it is being drawn
+      return [i.x + i.w * i.reveal, i.y + i.h * (0.25 + 0.5 * i.reveal)];
+    }
+    return null;
+  }
+
+  private paint(): void {
+    const c = this.ctx;
+    const grad = c.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#0f2b28");
+    grad.addColorStop(1, "#0a1f1d");
+    c.fillStyle = grad;
+    c.fillRect(0, 0, W, H);
+    c.strokeStyle = "rgba(255,255,255,0.06)";
+    c.lineWidth = 6;
+    c.strokeRect(24, 24, W - 48, H - 48);
+    c.fillStyle = "rgba(244,247,255,0.3)";
+    c.font = `600 34px ${FONT_STACK}`;
+    c.textAlign = "right";
+    c.fillText("USTAD AI", W - 70, 90);
+    c.textAlign = "left";
+    c.textBaseline = "top";
+
+    for (const i of this.items) {
+      c.save();
+      c.translate(i.x, i.y);
+      c.scale(i.scale, i.scale);
+      if (i.kind === "text" && i.lines?.length && i.size) {
+        const size = i.size;
+        const lh = size * 1.32;
+        const total = i.lines.join("").length || 1;
+        let shownChars = Math.ceil(total * i.reveal);
+        if (i.highlight) {
+          c.fillStyle = "rgba(255, 212, 137, 0.2)";
+          c.fillRect(-12, -8, i.w + 12, i.h);
+        }
+        c.fillStyle = i.color;
+        c.font = `600 ${size}px ${FONT_STACK}`;
+        const clusterIdx = i.lines.map((l) => clusterStarts(l));
+        const totalClusters = clusterIdx.reduce((a, s) => a + s.length, 0) || 1;
+        shownChars = Math.ceil(totalClusters * i.reveal);
+        i.lines.forEach((line, k) => {
+          const cnt = clusterIdx[k]!.length;
+          const take = Math.max(0, Math.min(cnt, shownChars));
+          // §7/§12: reveal + pen + layout all count the same grapheme clusters
+          const boundary = take >= cnt ? line.length : (clusterIdx[k]![take] ?? line.length);
+          const visible = line.slice(0, boundary);
+          shownChars -= cnt;
+          if (boundary > 0) c.fillText(visible, 0, k * lh);
+        });
+        if (i.underline && i.reveal >= 1) {
+          c.strokeStyle = "#ffd489";
+          c.lineWidth = 6;
+          const uw = this.measure(i.lines, size);
+          c.beginPath();
+          c.moveTo(0, i.lines.length * lh + 4);
+          c.lineTo(uw, i.lines.length * lh + 4);
+          c.stroke();
+        }
+        if (i.circled && i.reveal >= 1) {
+          c.strokeStyle = "#ff9f7a";
+          c.lineWidth = 6;
+          c.beginPath();
+          c.ellipse(i.w / 2 - 6, i.h / 2, i.w / 2 + 20, i.h / 2 + 14, 0, 0, Math.PI * 2);
+          c.stroke();
+        }
+      } else if (i.kind === "math" && i.math) {
+        c.textBaseline = "alphabetic";
+        /**
+         * Progressive formula writing: the typesetter consumes an ink budget in
+         * real writing order (numerator → bar → denominator, radical → body,
+         * base → exponent), and hands back the live pen tip for the hand IK.
+         */
+        const budget = (i.mathInk ?? 1) * i.reveal;
+        const res = drawMath(
+          c,
+          i.math,
+          0,
+          i.mathAsc ?? (i.size ?? 60) * 0.8,
+          i.size ?? 60,
+          FONT_STACK,
+          budget,
+          i.color,
+        );
+        if (res.tip) i.tip = [i.x + res.tip[0] * i.scale, i.y + res.tip[1] * i.scale];
+        if (i.underline && i.reveal >= 1) {
+          c.strokeStyle = "#ffd489";
+          c.lineWidth = 6;
+          c.beginPath();
+          c.moveTo(0, (i.mathAsc ?? 0) + 16);
+          c.lineTo(res.width, (i.mathAsc ?? 0) + 16);
+          c.stroke();
+        }
+      } else if (i.kind === "path" && i.points?.length) {
+        c.strokeStyle = i.color;
+        c.lineWidth = 8;
+        c.lineJoin = "round";
+        c.lineCap = "round";
+        const n = Math.max(2, Math.ceil(i.points.length * i.reveal));
+        c.beginPath();
+        c.moveTo(i.points[0]![0] - i.x, i.points[0]![1] - i.y);
+        for (let k = 1; k < n; k++) c.lineTo(i.points[k]![0] - i.x, i.points[k]![1] - i.y);
+        c.stroke();
+      } else if (i.kind === "arrow" && i.to) {
+        // §20: tail + head are stored RELATIVE to the item origin, so the drawn
+        // arrow always lives inside the declared (collision-tested) box.
+        const bx = i.from?.[0] ?? 0;
+        const by = i.from?.[1] ?? 0;
+        const ex = bx + (i.to[0] - bx) * i.reveal;
+        const ey = by + (i.to[1] - by) * i.reveal;
+        c.strokeStyle = i.color;
+        c.fillStyle = i.color;
+        c.lineWidth = 8;
+        c.beginPath();
+        c.moveTo(bx, by);
+        c.lineTo(ex, ey);
+        c.stroke();
+        const ang = Math.atan2(ey, ex);
+        c.beginPath();
+        c.moveTo(ex, ey);
+        c.lineTo(ex - 26 * Math.cos(ang - 0.4), ey - 26 * Math.sin(ang - 0.4));
+        c.lineTo(ex - 26 * Math.cos(ang + 0.4), ey - 26 * Math.sin(ang + 0.4));
+        c.closePath();
+        c.fill();
+      } else if (i.kind === "diagram" && i.diagram) {
+        // §16/§17: scale the REAL intrinsic drawing (shapes + labels + title)
+        // to fit the declared collision box exactly — the render can never
+        // exceed the placed bounds, whatever the label lengths are.
+        const intrinsic = diagramIntrinsicSize(
+          c,
+          i.diagram.kind,
+          i.diagram.title,
+          i.diagram.data,
+          i.diagram.labels,
+        );
+        const titlePad = i.diagram.title ? DIAGRAM_TITLE_PAD : 0;
+        const innerH = Math.max(1, intrinsic.h - (i.diagram.title ? DIAGRAM_TITLE_PAD : 0));
+        const s = Math.max(
+          0.05,
+          Math.min(1, i.w / intrinsic.w, Math.max(1, i.h - titlePad) / innerH),
+        );
+        c.save();
+        c.translate(0, titlePad);
+        c.scale(s, s);
+        drawDiagram(c, i.diagram, i.reveal);
+        c.restore();
+      }
+      c.restore();
+    }
+    c.textBaseline = "alphabetic";
+    this.texture.needsUpdate = true;
+  }
+
+  dispose(): void {
+    // §46/§49: no callback can fire into a disposed engine.
+    delete this.onChalk;
+    delete this.onPenMove;
+    delete this.onWriteEnd;
+    this.items = [];
+    this.archived = [];
+    this.texture.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+    this.mesh.geometry.dispose();
+    this.mesh.removeFromParent();
+  }
+}
+
+/** Diagram engine — procedural educational diagrams drawn on the board canvas. */
+function drawDiagram(
+  c: CanvasRenderingContext2D,
+  d: {
+    kind: DiagramKind;
+    title?: string | undefined;
+    data?: number[] | undefined;
+    labels?: string[] | undefined;
+  },
+  reveal: number,
+): void {
+  c.save();
+  c.strokeStyle = "#7fe3d4";
+  c.fillStyle = "#7fe3d4";
+  c.lineWidth = 6;
+  c.font = `600 38px ${FONT_STACK}`;
+  if (d.title) c.fillText(d.title, 0, -30);
+  /** Labels appear only once the shape they belong to has actually been drawn. */
+  const label = (text: string, x: number, y: number, at: number) => {
+    if (reveal < at) return;
+    c.save();
+    c.globalAlpha = Math.min(1, (reveal - at) / 0.12);
+    c.fillStyle = "#dbe6ff";
+    c.font = `500 30px ${FONT_STACK}`;
+    c.fillText(text, x, y);
+    c.restore();
+  };
+  const data = d.data?.length ? d.data : [4, 7, 3, 9, 6];
+  const labels = d.labels ?? [];
+
+  switch (d.kind) {
+    case "bar": {
+      const max = Math.max(...data);
+      data.forEach((v, i) => {
+        const h = (v / max) * 320 * reveal;
+        c.fillStyle = i % 2 ? "#ffd489" : "#7fe3d4";
+        c.fillRect(i * 110, 360 - h, 74, h);
+        label(labels[i] ?? String(v), i * 110, 400, (i + 0.8) / data.length);
+      });
+      break;
+    }
+    case "line": {
+      const max = data.length ? Math.max(...data) : 0;
+      c.beginPath();
+      const n = Math.max(1, Math.ceil(data.length * reveal));
+      for (let i = 0; i < n; i++) {
+        const x = i * 110;
+        const value = data[i] ?? 0;
+        const y = 360 - (max > 0 ? (value / max) * 320 : 0);
+        if (i === 0) c.moveTo(x, y);
+        else c.lineTo(x, y);
+      }
+      c.stroke();
+      break;
+    }
+    case "cycle": {
+      const R = 160;
+      c.beginPath();
+      c.arc(180, 200, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reveal);
+      c.stroke();
+      (labels.length ? labels : ["Start", "Grow", "Repeat"]).forEach((l, i, a) => {
+        const ang = (i / a.length) * Math.PI * 2 - Math.PI / 2;
+        label(
+          l,
+          180 + Math.cos(ang) * (R + 20),
+          200 + Math.sin(ang) * (R + 20),
+          (i + 0.85) / a.length,
+        );
+      });
+      break;
+    }
+    case "atom": {
+      c.beginPath();
+      c.arc(200, 200, 26, 0, Math.PI * 2);
+      c.fill();
+      for (let i = 0; i < 3; i++) {
+        c.save();
+        c.translate(200, 200);
+        c.rotate((i * Math.PI) / 3);
+        c.beginPath();
+        c.ellipse(0, 0, 170 * reveal, 62 * reveal, 0, 0, Math.PI * 2);
+        c.stroke();
+        c.restore();
+      }
+      break;
+    }
+    case "triangle": {
+      c.beginPath();
+      c.moveTo(0, 360);
+      c.lineTo(340 * reveal, 360);
+      c.lineTo(0, 360 - 300 * reveal);
+      c.closePath();
+      c.stroke();
+      label(labels[0] ?? "base", 140, 400, 0.6);
+      label(labels[1] ?? "height", 0, 200, 0.85);
+      break;
+    }
+    case "photosynthesis": {
+      // sun -> leaf -> outputs
+      c.fillStyle = "#ffd489";
+      c.beginPath();
+      c.arc(60, 60, 44 * reveal, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = "#ffd489";
+      c.beginPath();
+      c.moveTo(100, 100);
+      c.lineTo(210 * reveal, 190 * reveal);
+      c.stroke();
+      c.fillStyle = "#6fd08c";
+      c.beginPath();
+      c.ellipse(300, 230, 130 * reveal, 76 * reveal, -0.5, 0, Math.PI * 2);
+      c.fill();
+      label("CO₂ + H₂O", 40, 330, 0.55);
+      label("→ Glucose + O₂", 250, 400, 0.85);
+      break;
+    }
+    default: {
+      c.strokeRect(0, 0, 360 * reveal, 300 * reveal);
+      // Bug 34: render EVERY label. Wrap extra labels onto additional columns
+      // rather than dropping anything past the first four.
+      const colH = 48;
+      const maxRows = Math.max(1, Math.floor(280 / colH));
+      labels.forEach((l, i) => {
+        const col = Math.floor(i / maxRows);
+        const row = i % maxRows;
+        label(l, 16 + col * 180, 50 + row * colH, 0.25 + Math.min(0.7, i * 0.08));
+      });
+    }
+  }
+  c.restore();
+}
