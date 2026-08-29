@@ -22,9 +22,22 @@ import {
 } from "./mathtype";
 import { writeDurationMs, type BoardOp, type DiagramKind } from "./types";
 
-const W = 2560;
-const H = 880;
+/**
+ * BOARD VIEWPORT (texture) — the visible writing window. Board CONTENT lives in
+ * an unbounded logical space below it (§18/§19): the viewport scrolls down the
+ * content, content is never deleted to make room.
+ */
+export const BOARD_W = 2560;
+export const BOARD_H = 1010;
+const W = BOARD_W;
+const H = BOARD_H;
 const PAD = 26;
+
+/** How far the writing band advances when the current band is full (§20). */
+const BAND_STEP = Math.round(BOARD_H * 0.62);
+/** Auto-scroll smoothing (viewport px/s follow rate, frame-rate independent). */
+const SCROLL_K = 6;
+
 
 /**
  * AUTHORITATIVE typography metric (§7). Layout, collision, snapshot sizing,
@@ -49,10 +62,11 @@ const PAINT_INTERVAL = 1 / 30;
  * the board (old board was 4.22 m tall hung at y=2.4 → its upper half was
  * physically unreachable, which is why the hand never met the writing).
  */
-const SURFACE_W = 6.4;
-const SURFACE_H = 2.2;
-const SURFACE_Y = 1.5;
+const SURFACE_W = 6.9;
+const SURFACE_H = (SURFACE_W * BOARD_H) / BOARD_W;
+const SURFACE_Y = 1.75;
 const SURFACE_Z = -6.18;
+
 
 /** Fonts: Devanagari-capable stack so Hindi/Hinglish renders as real glyphs. */
 const FONT_STACK = '"Noto Sans Devanagari", Sora, "Segoe UI", sans-serif';
@@ -96,6 +110,8 @@ export type BoardSnapshot = {
     hasMath?: boolean;
   }>;
   viewport: { minSize: number; sizeScale: number };
+  /** persistent scrolling content-space state (§18–§20) */
+  scroll?: { bandY: number; scrollY: number };
 };
 
 type Region = { name: string; x: number; y: number; w: number; h: number };
@@ -111,13 +127,14 @@ type Region = { name: string; x: number; y: number; w: number; h: number };
  * side-by-side under the concept block; summary spans the full bottom row.
  */
 const REGIONS: Record<string, Region> = {
-  title: { name: "title", x: 120, y: 70, w: 2300, h: 140 },
-  concept: { name: "concept", x: 120, y: 240, w: 1240, h: 390 },
-  formula: { name: "formula", x: 120, y: 650, w: 600, h: 150 },
-  diagram: { name: "diagram", x: 1440, y: 240, w: 980, h: 570 },
-  example: { name: "example", x: 760, y: 650, w: 600, h: 150 },
-  summary: { name: "summary", x: 120, y: 650, w: 2300, h: 150 },
+  title: { name: "title", x: 120, y: 66, w: 2300, h: 150 },
+  concept: { name: "concept", x: 120, y: 250, w: 1240, h: 480 },
+  formula: { name: "formula", x: 120, y: 758, w: 600, h: 190 },
+  diagram: { name: "diagram", x: 1440, y: 250, w: 980, h: 698 },
+  example: { name: "example", x: 760, y: 758, w: 600, h: 190 },
+  summary: { name: "summary", x: 120, y: 758, w: 2300, h: 190 },
 };
+
 
 const ROLE_REGION: Record<BoardRole, string[]> = {
   title: ["title", "concept"],
@@ -453,6 +470,12 @@ export class BoardEngine {
   private texture: THREE.CanvasTexture;
   private items: Item[] = [];
   private archived: Item[] = [];
+  /** Top of the current writing band inside the persistent content space (px). */
+  private bandY = 0;
+  /** Live viewport offset and its smoothed target inside the content space. */
+  private scrollY = 0;
+  private scrollTargetY = 0;
+
   private nextId = 1;
   private nextZ = 1;
   private dirty = true;
@@ -545,9 +568,12 @@ export class BoardEngine {
   /** Canvas px → world point on the board (for hand IK / pen tracking). */
   pointToWorld(x: number, y: number, out: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
     const { width, height } = this.surface;
+    // content px → VIEWPORT px (the scrolled window is what physically exists
+    // on the board surface), so the teacher's hand tracks what is visible.
+    const vy = THREE.MathUtils.clamp(y - this.scrollY, 0, H);
     return out.set(
       this.mesh.position.x + (x / W - 0.5) * width,
-      this.mesh.position.y + (0.5 - y / H) * height,
+      this.mesh.position.y + (0.5 - vy / H) * height,
       this.mesh.position.z + 0.08,
     );
   }
@@ -663,7 +689,12 @@ export class BoardEngine {
     );
   }
 
-  /** Find non-overlapping space for a box inside the candidate regions of a role. */
+  /**
+   * Find non-overlapping space for a box inside the candidate regions of a role,
+   * within the CURRENT writing band. Regions are band-relative: band 0 is the
+   * first screen of the board, band N sits `N × BAND_STEP` px lower in the
+   * persistent content space (§18–§20).
+   */
   private place(
     role: BoardRole,
     w: number,
@@ -672,8 +703,9 @@ export class BoardEngine {
     for (const name of ROLE_REGION[role]) {
       const r = REGIONS[name];
       if (!r) continue;
+      const top = r.y + this.bandY;
       const stepY = 12;
-      for (let y = r.y; y + h <= r.y + r.h + 1; y += stepY) {
+      for (let y = top; y + h <= top + r.h + 1; y += stepY) {
         for (let x = r.x; x + w <= r.x + r.w + 1; x += 40) {
           const box = { x, y, w, h };
           if (!this.items.some((i) => this.overlaps(box, i))) return { x, y, region: name };
@@ -684,21 +716,45 @@ export class BoardEngine {
   }
 
   /**
-   * Board full → archive the OLDEST non-title content (§25). Items are kept
-   * z-ordered (= creation order). The ACTIVE handwriting stroke (the first
-   * unfinished item) is NEVER archived, and callers may protect additional
-   * items (e.g. sibling chunks written by the same semantic op).
+   * SCROLLING BOARD (§18–§20). The current band is full → the board does NOT
+   * delete or archive anything: it opens fresh writing space BELOW and scrolls
+   * the viewport down, exactly like a teacher moving to the next part of a long
+   * board. Earlier steps stay written in the content space and can be scrolled
+   * back to at any time.
    */
-  private makeRoom(protect: readonly Item[] = []): void {
-    const active = this.items.find((i) => i.reveal < 1);
-    const eligible = this.items.filter(
-      (i) => i.role !== "title" && i !== active && !protect.includes(i),
-    );
-    // prefer fully-written content, then the oldest queued item
-    const victim = eligible.find((i) => i.reveal >= 1) ?? eligible[0];
-    if (!victim) return;
-    this.items = this.items.filter((i) => i !== victim);
-    this.archived.push(victim);
+  private advanceBand(): void {
+    this.bandY += BAND_STEP;
+  }
+
+  /** Total written content height (viewport height + everything scrolled past). */
+  get contentHeight(): number {
+    const bottom = this.items.reduce((m, i) => {
+      const r = this.rectOf(i);
+      return Math.max(m, r.y + r.h);
+    }, H);
+    return Math.max(this.bandY + H, bottom + PAD);
+  }
+
+  /** Current scroll offset of the viewport inside the content space (px). */
+  get scroll(): number {
+    return this.scrollY;
+  }
+
+  /** Scroll the viewport so `y` (content px) is comfortably visible. */
+  scrollTo(y: number, immediate = false): void {
+    const max = Math.max(0, this.contentHeight - H);
+    this.scrollTargetY = THREE.MathUtils.clamp(y, 0, max);
+    if (immediate) this.scrollY = this.scrollTargetY;
+    this.dirty = true;
+  }
+
+  /** Keep the item that is being written inside the visible window. */
+  private followItem(i: Item): void {
+    const r = this.rectOf(i);
+    const top = r.y - PAD * 2;
+    const bottom = r.y + r.h + PAD * 2;
+    if (bottom > this.scrollTargetY + H) this.scrollTo(bottom - H);
+    else if (top < this.scrollTargetY) this.scrollTo(top);
   }
 
   /**
@@ -709,28 +765,18 @@ export class BoardEngine {
    */
   private add(
     partial: Omit<Item, "id" | "z" | "reveal" | "scale" | "x" | "y" | "region">,
-    protect: readonly Item[] = [],
+    _protect: readonly Item[] = [],
   ): Item {
     let spot = this.place(partial.role, partial.w, partial.h);
     let guard = 0;
-    while (!spot && guard++ < 16) {
-      this.makeRoom(protect);
+    while (!spot && guard++ < 24) {
+      // never destroy taught content — open a new band further down instead
+      this.advanceBand();
       spot = this.place(partial.role, partial.w, partial.h);
     }
     if (!spot) {
-      // Whole board exhausted even after archiving — clear non-protected
-      // content and place at the region origin, which is guaranteed inside
-      // the safe area. The active stroke and explicitly protected siblings
-      // (chunks/pages of the SAME semantic op) are never destroyed here.
-      const active = this.items.find((i) => i.reveal < 1);
-      const keep = new Set<Item>(protect);
-      if (active) keep.add(active);
-      this.items = this.items.filter((i) => i.role === "title" || keep.has(i));
-      spot = this.place(partial.role, partial.w, partial.h) ?? {
-        x: REGIONS[ROLE_REGION[partial.role][0] ?? "concept"]!.x,
-        y: REGIONS[ROLE_REGION[partial.role][0] ?? "concept"]!.y,
-        region: ROLE_REGION[partial.role][0] ?? "concept",
-      };
+      const region = ROLE_REGION[partial.role][0] ?? "concept";
+      spot = { x: REGIONS[region]!.x, y: REGIONS[region]!.y + this.bandY, region };
     }
     const item: Item = {
       ...partial,
@@ -744,8 +790,10 @@ export class BoardEngine {
     };
     this.items.push(item);
     this.items.sort((a, b) => a.z - b.z);
+    this.followItem(item);
     return item;
   }
+
 
   /** Measure + add ONE math item at a proven size (called only when it fits). */
   private addMath(src: string, role: BoardRole, ms: number, protect: readonly Item[] = []): Item {
@@ -804,7 +852,6 @@ export class BoardEngine {
   ): void {
     let ms = this.mathFitSize(src, role, baseSize);
     if (!this.mathFits(src, role, ms)) {
-      this.makeRoom(protect);
       ms = this.mathFitSize(src, role, baseSize);
     }
     if (this.mathFits(src, role, ms)) {
@@ -846,7 +893,6 @@ export class BoardEngine {
       this.layoutText(text, size, region.w - 40, region.h - 20);
     let fitted = layout();
     if (!fitted.fits) {
-      this.makeRoom(protect);
       fitted = layout();
     }
     if (fitted.fits) {
@@ -1063,7 +1109,7 @@ export class BoardEngine {
           const w = i.w * i.scale;
           const h = i.h * i.scale;
           i.x = THREE.MathUtils.clamp(i.x + op.dx, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y + op.dy, 0, Math.max(0, H - h));
+          i.y = THREE.MathUtils.clamp(i.y + op.dy, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
@@ -1081,13 +1127,17 @@ export class BoardEngine {
           const w = i.w * next;
           const h = i.h * next;
           i.x = THREE.MathUtils.clamp(i.x, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y, 0, Math.max(0, H - h));
+          i.y = THREE.MathUtils.clamp(i.y, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
       case "clear":
+        // an explicit clear is the ONLY way taught content leaves the board
         this.archived.push(...this.items);
         this.items = [];
+        this.bandY = 0;
+        this.scrollY = 0;
+        this.scrollTargetY = 0;
         break;
     }
     this.dirty = true;
@@ -1123,6 +1173,7 @@ export class BoardEngine {
         ...(i.math ? { hasMath: true } : {}),
       })),
       viewport: { minSize: this.minSize, sizeScale: this.sizeScale },
+      scroll: { bandY: this.bandY, scrollY: this.scrollY },
     };
   }
 
@@ -1139,6 +1190,9 @@ export class BoardEngine {
     this.archived = [];
     this.nextId = 1;
     this.nextZ = 1;
+    this.bandY = snap.scroll?.bandY ?? 0;
+    this.scrollY = snap.scroll?.scrollY ?? 0;
+    this.scrollTargetY = this.scrollY;
     if (snap.viewport) {
       this.minSize = snap.viewport.minSize;
       this.sizeScale = snap.viewport.sizeScale;
@@ -1209,13 +1263,27 @@ export class BoardEngine {
    */
   update(dt: number): void {
     let animating = false;
+
+    // SMOOTH AUTO-SCROLL (§18/§19): the viewport eases towards the band that is
+    // currently being written. Nothing is erased — earlier steps simply move up
+    // out of the visible window and remain in the content space.
+    if (Math.abs(this.scrollTargetY - this.scrollY) > 0.4) {
+      this.scrollY += (this.scrollTargetY - this.scrollY) * Math.min(1, dt * SCROLL_K);
+      animating = true;
+    } else if (this.scrollY !== this.scrollTargetY) {
+      this.scrollY = this.scrollTargetY;
+      this.dirty = true;
+    }
+
     const pending = this.items.find((i) => i.reveal < 1);
     if (pending) {
       animating = true;
+      this.followItem(pending);
       const seconds = Math.max(0.25, pending.writeMs / 1000);
       pending.reveal = Math.min(1, pending.reveal + dt / seconds);
       const tip = this.penTip(pending);
       if (tip) this.onPenMove?.(tip[0], tip[1]);
+
       // §44: the timeline gate flips in the SAME frame the final stroke lands —
       // onWriteEnd is atomic with busy→idle (never early, never twice, never a
       // frame late), so voice/writing/hand can never desynchronise by one beat.
@@ -1311,9 +1379,16 @@ export class BoardEngine {
     c.textAlign = "left";
     c.textBaseline = "top";
 
+    // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
+    // has scrolled out stays in the item list (never deleted) and simply is not
+    // rasterised this frame.
+    const viewTop = this.scrollY - PAD;
+    const viewBottom = this.scrollY + H + PAD;
     for (const i of this.items) {
+      const r = this.rectOf(i);
+      if (r.y + r.h < viewTop || r.y > viewBottom) continue;
       c.save();
-      c.translate(i.x, i.y);
+      c.translate(i.x, i.y - this.scrollY);
       c.scale(i.scale, i.scale);
       if (i.kind === "text" && i.lines?.length && i.size) {
         const size = i.size;
