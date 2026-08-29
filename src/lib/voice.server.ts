@@ -32,8 +32,10 @@ export async function transcribe(input: {
   const available = await usableProviders(guestId);
   const order = input.provider ? [input.provider] : ["deepgram", "groq", "openai", "assemblyai"];
   const chosen = order.map((p) => available.find((a) => a.provider === p)).find(Boolean);
-  if (!chosen)
-    throw new Error("No speech-to-text provider is connected. Use browser dictation instead.");
+  if (!chosen) {
+    const text = await gatewayTranscribe(input.base64, input.mime);
+    return { text, provider: "lovable" };
+  }
   const text = await sttTranscribe(chosen.provider, chosen.config, {
     base64: input.base64,
     mime: input.mime,
