@@ -117,7 +117,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // The pre-paint theme script sets class/color-scheme on <html> before
+    // hydration, so React must not diff those attributes.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
         {/* Appearance is applied before paint so an explicit Light/Dark choice
