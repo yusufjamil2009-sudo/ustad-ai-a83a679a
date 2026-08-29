@@ -154,7 +154,7 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
   push({
     phase: "intro",
     label: shorten(content.title, 30),
-    say: content.title,
+    say: `${phrase.greet} ${content.title}`,
     teacher: "wave",
     moveTo: "center",
     pointAt: "students",
