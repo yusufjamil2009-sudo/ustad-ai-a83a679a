@@ -41,18 +41,24 @@ function beat(step: Omit<LessonStep, "duration">): LessonStep {
   return { ...step, duration: Math.round(Math.max(3, seconds) * 10) / 10 };
 }
 
-const PAD: Record<LessonLang, { explain: string; recap: string; close: string }> = {
+const PAD: Record<
+  LessonLang,
+  { greet: string; explain: string; recap: string; close: string }
+> = {
   english: {
+    greet: "Hello everyone. Today's topic is",
     explain: "Let me explain that.",
     recap: "Let's quickly recap.",
     close: "Good — back to the lesson.",
   },
   hindi: {
+    greet: "नमस्ते। आज का विषय है",
     explain: "चलिए समझाता हूँ।",
     recap: "एक बार दोहरा लें।",
     close: "अच्छा — पाठ पर वापस।",
   },
   hinglish: {
+    greet: "Namaste. Aaj ka topic hai",
     explain: "Chaliye samjhata hoon.",
     recap: "Ek baar recap kar lete hain.",
     close: "Accha — wapas lesson pe.",
@@ -148,7 +154,7 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
   push({
     phase: "intro",
     label: shorten(content.title, 30),
-    say: content.title,
+    say: `${phrase.greet} ${content.title}`,
     teacher: "wave",
     moveTo: "center",
     pointAt: "students",
@@ -159,7 +165,6 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
   push({
     phase: "question",
     label: shorten(content.title, 30),
-    say: content.title,
     teacher: "write",
     moveTo: "board",
     pointAt: "board",
@@ -269,15 +274,19 @@ export function buildTeachingPlan(content: TeachingContent): LessonPlan {
       }
     }
 
-    // turn and explain — narration carries the prose; board is already written
-    push({
-      phase: "highlight",
-      label: shorten(block.label, 28),
-      say: `${phrase.explain} ${block.body}`,
-      teacher: "explain",
-      moveTo: "center",
-      pointAt: "board",
-    });
+    // The prose is spoken exactly once. It is only repeated here when the
+    // progressive-math path replaced the prose beats, so nothing is ever
+    // narrated twice.
+    if (mathSteps.length && block.body.trim()) {
+      push({
+        phase: "highlight",
+        label: shorten(block.label, 28),
+        say: `${phrase.explain} ${block.body}`,
+        teacher: "explain",
+        moveTo: "center",
+        pointAt: "board",
+      });
+    }
 
     if (block.example) {
       for (const line of chunkProse(block.example, 220)) {
