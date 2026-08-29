@@ -21,6 +21,29 @@ const pos = (c: CameraEngine): V3 => c.camera.position;
 const target = (c: CameraEngine): V3 => (c as unknown as { targetNow: V3 }).targetNow;
 const near = (a: number, b: number, eps = 1e-3) => Math.abs(a - b) <= eps;
 
+
+/** Board geometry the camera must always keep framed (BoardEngine defaults). */
+const BOARD = { x: 0, y: 1.75, z: -6.18, w: 6.9, h: 2.72 };
+
+/** Visible half-extents at the board plane for the current camera pose. */
+const view = (c: CameraEngine) => {
+  const d = pos(c).z - BOARD.z;
+  const halfH = Math.tan(((c.camera.fov * Math.PI) / 180) / 2) * d;
+  return { halfH, halfW: halfH * c.camera.aspect, d };
+};
+
+/** Assert the WHOLE board (and optionally the teacher) fits inside the frame. */
+const assertFramed = (c: CameraEngine, withTeacher = false) => {
+  const { halfH, halfW, d } = view(c);
+  assert.ok(d > 0.5, "camera must stand in front of the board");
+  const top = pos(c).y + halfH;
+  const bottom = pos(c).y - halfH;
+  assert.ok(top >= BOARD.y + BOARD.h / 2, "board top inside the frame");
+  assert.ok(bottom <= BOARD.y - BOARD.h / 2, "board bottom inside the frame");
+  assert.ok(halfW >= BOARD.w / 2, "full board width inside the frame — never cropped");
+  if (withTeacher) assert.ok(bottom <= 0.05, "the teacher must be in frame too");
+};
+
 const updateUntilRest = (c: CameraEngine, frames = 240): void => {
   for (let i = 0; i < frames; i++) c.update(1 / 60);
 };
@@ -29,9 +52,10 @@ test("A: the camera boots locked in the stable 16:9 teaching composition", () =>
   const c = new CameraEngine(16 / 9);
   assert.equal(c.isTeachingLocked(), true, "teaching lock must default ON");
   assert.ok(!c.isPortrait, "16:9 container → landscape rig");
-  assert.ok(near(pos(c).x, 0) && near(pos(c).y, 1.85) && near(pos(c).z, -2.35));
-  assert.ok(near(target(c).x, 0) && near(target(c).y, 1.5) && near(target(c).z, -4.2));
-  assert.equal(c.camera.fov, 44);
+  updateUntilRest(c);
+  assert.ok(near(pos(c).x, 0) && near(target(c).x, 0), "board stays centred horizontally");
+  assert.ok(near(pos(c).y, target(c).y), "the teaching camera looks straight ahead");
+  assertFramed(c);
 });
 
 test("B/C/D/E: orbit, pan and zoom calls cannot move the locked teaching camera", () => {
@@ -63,9 +87,10 @@ test("pan is applied EXACTLY ONCE (rig translation, not doubled on the position)
   c.panBy(30, 10); // one deliberate two-finger pan
   updateUntilRest(c);
 
-  // rig constants (16:9)
-  const rigPos = { x: 0, y: 1.85, z: -2.35 };
-  const rigTarget = { x: 0, y: 1.5, z: -4.2 };
+  const fresh = new CameraEngine(16 / 9);
+  updateUntilRest(fresh);
+  const rigPos = { ...pos(fresh) };
+  const rigTarget = { ...target(fresh) };
   // with yaw 0 / pitch 0 / zoom 1 the pan must shift position and target by the
   // SAME vector exactly once. The old bug produced 2× pan on the position.
   const posShift = { x: pos(c).x - rigPos.x, y: pos(c).y - rigPos.y, z: pos(c).z - rigPos.z };
@@ -87,14 +112,14 @@ test("H/I: ratio switch re-composes the rig and resets framing state", () => {
   c.setRatioMode("9:16");
   assert.equal(c.isPortrait, true, "9:16 must select the portrait teaching rig");
   updateUntilRest(c);
-  assert.ok(near(pos(c).y, 1.78) && near(pos(c).z, -3.05), "portrait rig position");
-  assert.ok(near(target(c).y, 1.55) && near(target(c).z, -4.6), "portrait rig target");
-  assert.equal(c.camera.fov, 62, "portrait FOV re-composition");
+  // 9:16 is a RE-COMPOSITION, not a crop: the full board plus the teacher fit
+  assertFramed(c, true);
+  assert.equal(c.camera.fov, 58, "portrait FOV re-composition");
 
   c.setRatioMode("16:9");
   assert.equal(c.isPortrait, false);
   updateUntilRest(c);
-  assert.ok(near(pos(c).y, 1.85) && near(pos(c).z, -2.35), "landscape rig restored");
+  assertFramed(c);
 });
 
 test("J: Reset Teaching View restores the fixed teaching frame after drift", () => {
@@ -108,8 +133,11 @@ test("J: Reset Teaching View restores the fixed teaching frame after drift", () 
   updateUntilRest(c);
   c.resetOrbit(); // the Reset Teaching View control
   updateUntilRest(c);
-  assert.ok(near(pos(c).y, 1.78) && near(pos(c).z, -3.05), "back on the portrait rig");
-  assert.ok(near(target(c).x, 0) && near(target(c).y, 1.55), "teaching look target");
+  const fresh = new CameraEngine(9 / 16);
+  updateUntilRest(fresh);
+  assert.ok(near(pos(c).y, pos(fresh).y) && near(pos(c).z, pos(fresh).z), "back on the rig");
+  assert.ok(near(target(c).x, 0), "teaching look target re-centred");
+  assertFramed(c, true);
 });
 
 test("the matrix pipeline rests once the camera is at rest", () => {

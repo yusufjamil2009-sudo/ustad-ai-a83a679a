@@ -23,25 +23,36 @@ type Rig = { pos: THREE.Vector3; target: THREE.Vector3; fov: number };
 export type RatioMode = "auto" | "16:9" | "9:16";
 
 /**
- * 16:9 framing — desktop, laptop, tablet landscape. Board + teacher centred, with
- * enough of the writing surface in view to read what is being taught.
+ * FRAMING SUBJECT — the real geometry the camera must keep on screen. The
+ * camera no longer uses hardcoded rig positions: it solves the distance that
+ * fits the ACTUAL board bounding box (plus the teacher) inside the current
+ * viewport, for any aspect ratio.
  */
-const RIG_LANDSCAPE: Rig = {
-  pos: new THREE.Vector3(0, 1.85, -2.35),
-  target: new THREE.Vector3(0, 1.5, -4.2),
-  fov: 44,
+export type FramingSubject = {
+  boardCenter: THREE.Vector3;
+  boardWidth: number;
+  boardHeight: number;
+  teacherFootY: number;
+  teacherHeadY: number;
 };
 
-/**
- * 9:16 framing — mobile portrait. Not a crop of 16:9: the single teaching rig is
- * re-composed (closer, taller vertical FOV, subject centred lower) so the board
- * and the teacher still read on a narrow screen.
- */
-const RIG_PORTRAIT: Rig = {
-  pos: new THREE.Vector3(0, 1.78, -3.05),
-  target: new THREE.Vector3(0, 1.55, -4.6),
-  fov: 62,
+const DEFAULT_SUBJECT: FramingSubject = {
+  boardCenter: new THREE.Vector3(0, 1.75, -6.18),
+  boardWidth: 6.9,
+  boardHeight: 2.72,
+  teacherFootY: 0,
+  teacherHeadY: 2.02,
 };
+
+/** Vertical FOV per framing family (portrait needs more vertical room). */
+const FOV_LANDSCAPE = 42;
+const FOV_PORTRAIT = 58;
+
+/** Safe area (§29): the board never touches the viewport edge. */
+const SAFE_X_LANDSCAPE = 1.07;
+const SAFE_X_PORTRAIT = 1.04;
+const SAFE_TOP = 0.16;
+
 
 /** Below this (metres²) the camera counts as "at rest" — matrix work is skipped. */
 const REST_EPSILON_SQ = 1e-8;
@@ -83,18 +94,83 @@ export class CameraEngine {
   private appliedFov = -1;
   private projectionDirty = true;
   private lastSetAspect = -1;
+  private subject: FramingSubject = { ...DEFAULT_SUBJECT, boardCenter: DEFAULT_SUBJECT.boardCenter.clone() };
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(RIG_LANDSCAPE.fov, aspect, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(FOV_LANDSCAPE, aspect, 0.1, 200);
+    this.camera.aspect = aspect > 0 ? aspect : 16 / 9;
     this.portrait = aspect < 1;
+    this.containerPortrait = this.portrait;
     this.from = this.rig();
     this.to = this.rig();
     this.applyImmediate();
   }
 
+  /**
+   * RESPONSIVE FRAMING ENGINE (§4). Solves the camera distance from the REAL
+   * board bounding box, the teacher's height and the live viewport aspect, so
+   * the full board plus the teacher always fit inside the safe area — in 16:9
+   * and in 9:16 alike. No hardcoded per-device rig, no scene scaling.
+   */
   private rig(): Rig {
-    return this.portrait ? RIG_PORTRAIT : RIG_LANDSCAPE;
+    const s = this.subject;
+    const portrait = this.portrait;
+    const fov = portrait ? FOV_PORTRAIT : FOV_LANDSCAPE;
+    const boardTop = s.boardCenter.y + s.boardHeight / 2;
+    const boardBottom = s.boardCenter.y - s.boardHeight / 2;
+    // vertical safe area: the WHOLE board, plus the teacher (fully in portrait,
+    // upper body in landscape where horizontal room is the binding constraint)
+    const top = boardTop + SAFE_TOP;
+    const bottom = portrait
+      ? Math.min(boardBottom, s.teacherFootY) - 0.1
+      : Math.min(boardBottom - 0.1, s.teacherFootY + 0.5);
+    const halfH = Math.max(0.4, (top - bottom) / 2);
+    const halfW = (s.boardWidth * (portrait ? SAFE_X_PORTRAIT : SAFE_X_LANDSCAPE)) / 2;
+    const aspect = this.camera.aspect > 0 ? this.camera.aspect : portrait ? 9 / 16 : 16 / 9;
+    const vt = Math.tan((fov * Math.PI) / 180 / 2);
+    const dist = THREE.MathUtils.clamp(
+      Math.max(halfH / vt, halfW / (vt * aspect)) + 0.3,
+      2.2,
+      18,
+    );
+    // Composition: in 9:16 the BOARD WIDTH is the binding constraint, so the
+    // frame is much taller than the subject. Re-centre the surplus height so the
+    // board sits in the middle of the portrait frame instead of leaving a large
+    // empty floor beneath it (still no crop — the whole board stays inside).
+    const contentMid = (top + bottom) / 2;
+    const visibleHalfH = dist * vt;
+    const surplus = Math.max(0, visibleHalfH - halfH);
+    const centerY = portrait ? contentMid + surplus * 0.55 : contentMid;
+    return {
+      pos: new THREE.Vector3(s.boardCenter.x, centerY, s.boardCenter.z + dist),
+      target: new THREE.Vector3(s.boardCenter.x, centerY, s.boardCenter.z),
+      fov,
+    };
   }
+
+
+  /**
+   * Publish the real classroom geometry (board bounds + teacher) to the camera.
+   * Called when the board is built/resized and when the teacher is re-scaled —
+   * the framing is then recomputed from actual bounds, never guessed.
+   */
+  setSubject(subject: Partial<FramingSubject>): void {
+    const next: FramingSubject = {
+      ...this.subject,
+      ...subject,
+      boardCenter: (subject.boardCenter ?? this.subject.boardCenter).clone(),
+    };
+    const same =
+      next.boardWidth === this.subject.boardWidth &&
+      next.boardHeight === this.subject.boardHeight &&
+      next.teacherFootY === this.subject.teacherFootY &&
+      next.teacherHeadY === this.subject.teacherHeadY &&
+      next.boardCenter.equals(this.subject.boardCenter);
+    this.subject = next;
+    if (same) return;
+    this.retarget(true);
+  }
+
 
   get isPortrait(): boolean {
     return this.portrait;
@@ -216,18 +292,35 @@ export class CameraEngine {
   private applyRatioMode(animate: boolean): void {
     const portrait =
       this.ratioMode === "9:16" ? true : this.ratioMode === "16:9" ? false : this.containerPortrait;
-    if (portrait === this.portrait) return;
     this.portrait = portrait;
+    this.retarget(animate);
+  }
+
+  /**
+   * Re-solve the teaching frame for the current subject/aspect/ratio. STABLE by
+   * construction (§5): when the newly solved rig is materially identical to the
+   * active one, nothing moves — the camera never drifts while teaching.
+   */
+  private retarget(animate: boolean): void {
+    const next = this.rig();
+    if (
+      next.pos.distanceToSquared(this.to.pos) < 1e-6 &&
+      next.target.distanceToSquared(this.to.target) < 1e-6 &&
+      Math.abs(next.fov - this.to.fov) < 1e-4
+    ) {
+      return;
+    }
     this.from = {
       pos: this.camera.position.clone(),
       target: this.targetNow.clone(),
       fov: this.camera.fov,
     };
-    this.to = this.rig();
+    this.to = next;
     this.duration = animate ? 0.6 : 0.05;
     this.t = 0;
     this.projectionDirty = true;
   }
+
 
   /** Pointer orbit — IGNORED while the teaching lock is on. */
   orbitBy(dx: number, dy: number): void {

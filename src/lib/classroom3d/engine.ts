@@ -144,6 +144,10 @@ export class ClassroomEngine {
     );
     this.xr = new XREngine(this.render.renderer);
 
+    // RESPONSIVE FRAMING: publish the real board + teacher geometry so the
+    // camera solves a framing that fits both, at any aspect ratio (§4/§29).
+    this.publishFraming();
+
     this.audio.attach(this.cameras.camera);
     this.board.onChalk = () => this.audio.sfx("chalk");
 
@@ -263,6 +267,7 @@ export class ClassroomEngine {
       this.lastResize.h = h;
       this.render.resize(w, h);
       const aspect = w / h;
+      this.publishFraming();
       this.cameras.setAspect(aspect, PerformanceEngine.isMobile());
       // board typography adapts to the real stage size, independent of 3D quality
       this.board.setViewport(w, h, aspect < 1);
@@ -565,11 +570,28 @@ export class ClassroomEngine {
         step.board?.some((op) => op.op === "write" || op.op === "update" || op.op === "diagram"),
       );
       if (!writes) this.flushPendingSay();
-      else this.sayTimer = window.setTimeout(() => this.flushPendingSay(), 900);
+      // FAIL-SAFE ONLY (§26/§27): narration normally starts on the FIRST chalk
+      // stroke (board.onPenMove → flushPendingSay), an event — not a timeout.
+      // This short guard exists purely so voice can never be blocked when a
+      // board op produces no stroke; it never makes the voice wait for slow
+      // writing, and writing never waits for the voice.
+      else this.sayTimer = window.setTimeout(() => this.flushPendingSay(), 220);
     }
     this.state.set({ stepIndex: index, teacher: this.teacher.animation });
     this.state.bus.emit("step", { index, total: this.timeline.total });
     this.persist();
+  }
+
+  /** Publish live board + teacher bounds to the camera framing engine. */
+  private publishFraming(): void {
+    const surface = this.board.surface;
+    this.cameras.setSubject({
+      boardCenter: this.board.mesh.position.clone(),
+      boardWidth: surface.width,
+      boardHeight: surface.height,
+      teacherFootY: this.teacher.position.y,
+      teacherHeadY: this.teacher.headTopY,
+    });
   }
 
   /**

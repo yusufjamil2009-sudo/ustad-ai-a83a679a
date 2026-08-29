@@ -152,11 +152,12 @@ test("layout: sequential content NEVER overlaps (effective rendered bounds)", as
       role: i.role,
       kind: i.kind,
     }));
-    // every item sits fully inside the canvas
+    // every item sits fully inside the (scrolling) content space
+    const contentH = b.contentHeight;
     for (const it of items) {
       assert.ok(it.x >= 0 && it.y >= 0, `item origin on board: ${JSON.stringify(it)}`);
       assert.ok(
-        it.x + it.w <= 2560 + 1 && it.y + it.h <= 880 + 1,
+        it.x + it.w <= 2560 + 1 && it.y + it.h <= contentH + 1,
         `item fits board: ${JSON.stringify(it)}`,
       );
     }
@@ -232,7 +233,7 @@ test("§20/§21: arrow + path bounding boxes describe the REAL rendered geometry
     const items = b.snapshot().items;
     for (const it of items) {
       assert.ok(it.w > 0 && it.h > 0, `positive size: ${it.kind}`);
-      assert.ok(it.x >= 0 && it.y >= 0 && it.x + it.w <= 2560 && it.y + it.h <= 880);
+      assert.ok(it.x >= 0 && it.y >= 0 && it.x + it.w <= 2560 && it.y + it.h <= b.contentHeight);
     }
     const arrow = items.find((i) => i.kind === "arrow")!;
     assert.equal(arrow.w, 640 - 180 + 46, "arrow width from DELTA extents");
@@ -260,7 +261,7 @@ test("§5: an over-long formula still lands readable — split, never clipped", 
     for (const m of maths) {
       assert.ok((m.size ?? 0) >= 46, `readability floor respected (${m.size})`);
       assert.ok(m.x >= 0 && m.x + m.w <= 2560, "formula inside the board");
-      assert.ok(m.h <= 880, "formula height inside the board");
+      assert.ok(m.h <= 1010, "formula height inside one board viewport");
     }
     // full text preserved across chunks
     const joined = maths.map((m) => m.text ?? "").join("|");
@@ -460,16 +461,20 @@ test("§14: pointToWorld maps all four corners and centre exactly", async () => 
     const b = new BoardEngine(8);
     const p = b.pointToWorld.bind(b);
     const near = (a: number, c: number) => Math.abs(a - c) < 1e-9;
+    const { width, height } = b.surface;
+    const halfW = width / 2;
+    const top = 1.75 + height / 2;
+    const bottom = 1.75 - height / 2;
     const tl = p(0, 0);
-    assert.ok(near(tl.x, -3.2) && near(tl.y, 2.6));
+    assert.ok(near(tl.x, -halfW) && near(tl.y, top));
     const tr = p(2560, 0);
-    assert.ok(near(tr.x, 3.2) && near(tr.y, 2.6));
-    const bl = p(0, 880);
-    assert.ok(near(bl.x, -3.2) && near(bl.y, 0.4));
-    const br = p(2560, 880);
-    assert.ok(near(br.x, 3.2) && near(br.y, 0.4));
-    const centre = p(1280, 440);
-    assert.ok(near(centre.x, 0) && near(centre.y, 1.5));
+    assert.ok(near(tr.x, halfW) && near(tr.y, top));
+    const bl = p(0, 1010);
+    assert.ok(near(bl.x, -halfW) && near(bl.y, bottom));
+    const br = p(2560, 1010);
+    assert.ok(near(br.x, halfW) && near(br.y, bottom));
+    const centre = p(1280, 505);
+    assert.ok(near(centre.x, 0) && near(centre.y, 1.75));
     assert.ok(near(tl.z, -6.18 + 0.08), "board front face");
   });
 });
@@ -582,4 +587,53 @@ test("§37: renderer.setQuality with a DPR change resizes buffer + post once", a
   assert.match(setQuality, /post\?\.setSize/, "post chain resized with DPR");
   // and the constructor's default 1×1 size cannot trigger a premature buffer alloc
   assert.match(src, /size = \{ w: 1, h: 1 \}/);
+});
+
+/* ---------------- §18–§20 MASTER BOARD: scrolling, never deleting ---------------- */
+
+test("§18: a long lesson scrolls the board instead of erasing earlier steps", async () => {
+  await withFakeDocument(async () => {
+    const { BoardEngine } = await loadBoard();
+    const b = new BoardEngine(8);
+    b.setViewport(1280, 720, false);
+    const steps = 14;
+    for (let i = 1; i <= steps; i++) {
+      b.apply({
+        op: "write",
+        text: `Step ${i}: yeh teaching line number ${i} hai aur ise board par likha jaana chahiye.`,
+      });
+      await settle(b);
+    }
+    const items = b.snapshot().items;
+    // §19: nothing is archived/deleted — every written step is still on the board
+    for (let i = 1; i <= steps; i++) {
+      assert.ok(
+        items.some((it) => (it.text ?? "").startsWith(`Step ${i}:`)),
+        `step ${i} must still exist on the scrolling board`,
+      );
+    }
+    // §18: the content space grew beyond one viewport and the view scrolled down
+    assert.ok(b.contentHeight > 1010, "content space must extend past one viewport");
+    assert.ok(b.scroll > 0, "the viewport must have scrolled to the active band");
+    // the newest step is inside the visible window
+    const last = items.find((it) => (it.text ?? "").startsWith(`Step ${steps}:`))!;
+    assert.ok(last.y >= b.scroll - 60, "active step is at/below the top of the window");
+    assert.ok(last.y + last.h <= b.scroll + 1010 + 60, "active step is inside the window");
+  });
+});
+
+test("§20: an explicit clear is the only thing that resets the content space", async () => {
+  await withFakeDocument(async () => {
+    const { BoardEngine } = await loadBoard();
+    const b = new BoardEngine(8);
+    for (let i = 0; i < 10; i++) {
+      b.apply({ op: "write", text: `Line ${i} of a long derivation on the master board.` });
+      await settle(b);
+    }
+    assert.ok(b.contentHeight > 1010);
+    b.apply({ op: "clear" });
+    await settle(b);
+    assert.equal(b.snapshot().items.length, 0);
+    assert.equal(b.scroll, 0, "clear returns the viewport to the top");
+  });
 });

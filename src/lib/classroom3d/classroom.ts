@@ -124,21 +124,22 @@ export function buildClassroom(scene: THREE.Scene, lib: MaterialLibrary): Classr
 
   /* ---------- board frame + chalk ledge ---------- */
 
-  // Frame matches the writing surface, which is hung at real teaching height
-  // (board 6.4 × 2.2 at y = 1.5) so the teacher can reach its top row.
+  // Frame matches the MASTER writing surface (6.9 × 2.72 hung at y = 1.75) —
+  // a wider, taller board whose top row the teacher can still reach.
   const boardFrame = new THREE.Mesh(
-    uv2(new THREE.BoxGeometry(6.9, 2.62, 0.16)),
+    uv2(new THREE.BoxGeometry(7.4, 3.14, 0.16)),
     lib.get("BOARD_FRAME_PBR", [4, 2]),
   );
-  boardFrame.position.set(0, 1.5, -6.3);
+  boardFrame.position.set(0, 1.75, -6.3);
   boardFrame.castShadow = true;
   boardFrame.receiveShadow = true;
   group.add(boardFrame);
 
-  const ledge = new THREE.Mesh(uv2(new THREE.BoxGeometry(6.6, 0.09, 0.26)), metal);
-  ledge.position.set(0, 0.3, -6.04);
+  const ledge = new THREE.Mesh(uv2(new THREE.BoxGeometry(7.1, 0.09, 0.26)), metal);
+  ledge.position.set(0, 0.24, -6.04);
   ledge.receiveShadow = true;
   group.add(ledge);
+
 
   /* ---------- teacher desk ---------- */
 

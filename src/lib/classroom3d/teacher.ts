@@ -40,9 +40,21 @@ export class TeacherEngine {
   private reachLen = 0.82;
   onArrive?: () => void;
 
+  /**
+   * Presence scale (§14/§15). The teacher reads as a real adult in front of the
+   * master board — visible in 16:9 and 9:16 — without towering over the room.
+   * Uniform, so the IK (solved in the teacher's local space) is unaffected.
+   */
+  static readonly SCALE = 1.16;
+
   /** Highest world point the hand can naturally touch (used to size the board). */
   get maxReachY(): number {
-    return this.group.position.y + this.shoulderY + this.reachLen + 0.2;
+    return this.group.position.y + (this.shoulderY + this.reachLen + 0.2) * TeacherEngine.SCALE;
+  }
+
+  /** Head-top world height — published to the camera framing engine. */
+  get headTopY(): number {
+    return this.group.position.y + 1.92 * TeacherEngine.SCALE;
   }
 
   constructor(scene: THREE.Scene, position = new THREE.Vector3(0, 0, -4.6)) {
@@ -233,6 +245,7 @@ export class TeacherEngine {
       this.rightLeg,
     );
     this.group.position.copy(position);
+    this.group.scale.setScalar(TeacherEngine.SCALE);
     this.group.name = "teacher";
     scene.add(this.group);
   }
@@ -386,7 +399,8 @@ export class TeacherEngine {
     // of the board instead of stretching the arm unnaturally.
     const target = this.penTarget ?? this.pointTarget;
     const need = target
-      ? target.y - (this.group.position.y + this.shoulderY + this.reachLen * 0.86)
+      ? target.y -
+        (this.group.position.y + (this.shoulderY + this.reachLen * 0.86) * TeacherEngine.SCALE)
       : -1;
     const wantRise = THREE.MathUtils.clamp(need, 0, 0.12);
     const wantLean = target ? THREE.MathUtils.clamp(need * 1.6, -0.05, 0.16) : 0;
