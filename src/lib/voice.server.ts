@@ -22,6 +22,34 @@ export async function synthesize(input: {
   return { ...audio, provider: chosen.provider };
 }
 
+/** Fallback STT via the built-in Lovable AI gateway (no user API key needed). */
+async function gatewayTranscribe(base64: string, mime: string): Promise<string> {
+  const apiKey = process.env["LOVABLE_API_KEY"];
+  if (!apiKey)
+    throw new Error("No speech-to-text provider is connected. Use browser dictation instead.");
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const base = (mime || "audio/webm").split(";")[0] ?? "audio/webm";
+  const ext =
+    ({ "audio/webm": "webm", "audio/mp4": "mp4", "audio/mpeg": "mp3", "audio/wav": "wav" } as Record<
+      string,
+      string
+    >)[base] ?? "webm";
+  const form = new FormData();
+  form.append("model", "openai/gpt-4o-mini-transcribe");
+  form.append("file", new Blob([bytes as unknown as BlobPart], { type: base }), `recording.${ext}`);
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Transcription failed [${res.status}]: ${body}`);
+  }
+  const data = (await res.json()) as { text?: string };
+  return data.text ?? "";
+}
+
 export async function transcribe(input: {
   token: unknown;
   base64: string;
