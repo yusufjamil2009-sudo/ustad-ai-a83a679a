@@ -1,10 +1,26 @@
-/** AES-GCM encryption for stored provider credentials. */
+/**
+ * AES-GCM encryption for stored provider credentials.
+ *
+ * Rotation-safe: new data is always encrypted with USTAD_KEY_ENCRYPTION_SECRET,
+ * while data written before a rotation still decrypts with
+ * USTAD_KEY_ENCRYPTION_SECRET_PREVIOUS (kept for one rotation window, then
+ * removed). See docs/SECRETS.md.
+ */
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-async function aesKey(): Promise<CryptoKey> {
+function currentSecret(): string {
   const secret = process.env["USTAD_KEY_ENCRYPTION_SECRET"];
   if (!secret) throw new Error("Encryption secret is not configured");
+  return secret;
+}
+
+function previousSecret(): string | undefined {
+  const prev = process.env["USTAD_KEY_ENCRYPTION_SECRET_PREVIOUS"]?.trim();
+  return prev && prev !== process.env["USTAD_KEY_ENCRYPTION_SECRET"] ? prev : undefined;
+}
+
+async function aesKey(secret = currentSecret()): Promise<CryptoKey> {
   const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret));
   return crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
@@ -32,12 +48,24 @@ export async function encryptString(plain: string): Promise<string> {
 export async function decryptString(payload: string): Promise<string> {
   if (!payload.startsWith("v1:")) return payload;
   const [, ivB64, ctB64] = payload.split(":");
-  const pt = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromB64(ivB64!) },
-    await aesKey(),
-    fromB64(ctB64!),
+  const secrets = [currentSecret(), previousSecret()].filter(Boolean) as string[];
+  let lastError: unknown;
+  for (const secret of secrets) {
+    try {
+      const pt = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: fromB64(ivB64!) },
+        await aesKey(secret),
+        fromB64(ctB64!),
+      );
+      return dec.decode(pt);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw new Error(
+    "Stored credential could not be decrypted with the current or previous encryption secret. Re-enter the provider API key in Settings.",
+    { cause: lastError },
   );
-  return dec.decode(pt);
 }
 
 export async function encryptConfig(

@@ -14,9 +14,7 @@ function b64url(bytes: ArrayBuffer): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function key(): Promise<CryptoKey> {
-  const secret = process.env["USTAD_GUEST_SECRET"];
-  if (!secret) throw new Error("Guest signing secret is not configured");
+async function key(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
     enc.encode(secret),
@@ -26,13 +24,21 @@ async function key(): Promise<CryptoKey> {
   );
 }
 
-async function signPayload(payload: string): Promise<string> {
-  const sig = await crypto.subtle.sign("HMAC", await key(), enc.encode(payload));
-  return b64url(sig);
+function currentSecret(): string {
+  const secret = process.env["USTAD_GUEST_SECRET"];
+  if (!secret) throw new Error("Guest signing secret is not configured");
+  return secret;
 }
 
-async function sign(guestId: string): Promise<string> {
-  return signPayload(guestId);
+/** Old secret kept during a rotation window so existing tokens keep working. */
+function previousSecret(): string | undefined {
+  const prev = process.env["USTAD_GUEST_SECRET_PREVIOUS"]?.trim();
+  return prev && prev !== process.env["USTAD_GUEST_SECRET"] ? prev : undefined;
+}
+
+async function signPayload(payload: string, secret = currentSecret()): Promise<string> {
+  const sig = await crypto.subtle.sign("HMAC", await key(secret), enc.encode(payload));
+  return b64url(sig);
 }
 
 export function newGuestId(): string {
@@ -74,11 +80,18 @@ export async function verifyToken(token: unknown): Promise<string | null> {
   if (!sig) return null;
   // New 3-part tokens sign guestId.expiry so the expiry is tamper-proof.
   const signed = exp !== undefined ? `${guestId}.${parts[1]}` : guestId!;
-  const expected = await signPayload(signed);
-  if (expected.length !== sig.length) return null;
-  let diff = 0;
-  for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
-  return diff === 0 ? guestId! : null;
+  const secrets = [currentSecret(), previousSecret()].filter(Boolean) as string[];
+  for (const secret of secrets) {
+    const expected = await signPayload(signed, secret);
+    if (expected.length !== sig.length) continue;
+    let diff = 0;
+    for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+    // Tokens signed with the PREVIOUS secret stay valid during the rotation
+    // window; the client is re-issued a token signed with the current secret
+    // on its next bootstrap, so no guest ever loses their data on a rotation.
+    if (diff === 0) return guestId!;
+  }
+  return null;
 }
 
 const GUEST_COOKIE = "ustad.guest";
