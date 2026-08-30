@@ -14,9 +14,7 @@ function b64url(bytes: ArrayBuffer): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function key(): Promise<CryptoKey> {
-  const secret = process.env["USTAD_GUEST_SECRET"];
-  if (!secret) throw new Error("Guest signing secret is not configured");
+async function key(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
     enc.encode(secret),
@@ -26,13 +24,21 @@ async function key(): Promise<CryptoKey> {
   );
 }
 
-async function signPayload(payload: string): Promise<string> {
-  const sig = await crypto.subtle.sign("HMAC", await key(), enc.encode(payload));
-  return b64url(sig);
+function currentSecret(): string {
+  const secret = process.env["USTAD_GUEST_SECRET"];
+  if (!secret) throw new Error("Guest signing secret is not configured");
+  return secret;
 }
 
-async function sign(guestId: string): Promise<string> {
-  return signPayload(guestId);
+/** Old secret kept during a rotation window so existing tokens keep working. */
+function previousSecret(): string | undefined {
+  const prev = process.env["USTAD_GUEST_SECRET_PREVIOUS"]?.trim();
+  return prev && prev !== process.env["USTAD_GUEST_SECRET"] ? prev : undefined;
+}
+
+async function signPayload(payload: string, secret = currentSecret()): Promise<string> {
+  const sig = await crypto.subtle.sign("HMAC", await key(secret), enc.encode(payload));
+  return b64url(sig);
 }
 
 export function newGuestId(): string {
