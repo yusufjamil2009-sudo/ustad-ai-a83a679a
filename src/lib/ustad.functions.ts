@@ -6,6 +6,7 @@ import * as study from "./study.server";
 import * as voice from "./voice.server";
 import * as curriculum from "./curriculum.server";
 import * as diagram from "./diagram.server";
+import * as diagramImage from "./diagram-image.server";
 import * as bookKnowledge from "./book-knowledge.server";
 import * as chapterMaster from "./chapter-master.server";
 import * as chapterLesson from "./chapter-lesson.server";
