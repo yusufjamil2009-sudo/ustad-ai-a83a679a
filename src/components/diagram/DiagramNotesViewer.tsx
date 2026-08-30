@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { diagramSpecFn } from "@/lib/ustad-api";
+import { diagramSpecFn, diagramImageFn } from "@/lib/ustad-api";
 import { useGuest } from "@/lib/ustad-client";
 import type { Language } from "@/lib/router.server";
 import { renderSvg } from "@/lib/diagrams/render-svg";
