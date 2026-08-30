@@ -24,6 +24,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useGuest } from "@/lib/ustad-client";
 import { useSettings } from "@/lib/settings-store";
+import { useGreeting } from "@/hooks/useGreeting";
+import { UstadLogo } from "@/components/UstadLogo";
 import { setClassroomHandoff } from "@/lib/classroom-handoff";
 import { wantsFieldTrip } from "@/lib/teaching/field-trip";
 import { answerToLessonContent } from "@/lib/answer-to-lesson";
@@ -154,6 +156,7 @@ async function uploadOneFile(token: string, file: File, mime: string) {
 function ChatPage() {
   const { token } = useGuest();
   const { settings } = useSettings();
+  const greeting = useGreeting();
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
