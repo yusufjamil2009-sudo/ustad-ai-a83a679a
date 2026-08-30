@@ -314,6 +314,15 @@ export function DiagramNotesViewer({
           <div className="grid h-64 place-items-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 size-5 animate-spin" /> Generating…
           </div>
+        ) : mode === "diagram" && imageUrl ? (
+          <div className="overflow-auto rounded-md border border-border bg-white">
+            <img
+              src={imageUrl}
+              alt={title || "Educational diagram"}
+              style={{ zoom: zoom as number }}
+              className="mx-auto block h-auto w-full"
+            />
+          </div>
         ) : mode === "diagram" && svg ? (
           <div
             className="overflow-auto rounded-md border border-border bg-white"
