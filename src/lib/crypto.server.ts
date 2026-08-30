@@ -1,10 +1,26 @@
-/** AES-GCM encryption for stored provider credentials. */
+/**
+ * AES-GCM encryption for stored provider credentials.
+ *
+ * Rotation-safe: new data is always encrypted with USTAD_KEY_ENCRYPTION_SECRET,
+ * while data written before a rotation still decrypts with
+ * USTAD_KEY_ENCRYPTION_SECRET_PREVIOUS (kept for one rotation window, then
+ * removed). See docs/SECRETS.md.
+ */
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-async function aesKey(): Promise<CryptoKey> {
+function currentSecret(): string {
   const secret = process.env["USTAD_KEY_ENCRYPTION_SECRET"];
   if (!secret) throw new Error("Encryption secret is not configured");
+  return secret;
+}
+
+function previousSecret(): string | undefined {
+  const prev = process.env["USTAD_KEY_ENCRYPTION_SECRET_PREVIOUS"]?.trim();
+  return prev && prev !== process.env["USTAD_KEY_ENCRYPTION_SECRET"] ? prev : undefined;
+}
+
+async function aesKey(secret = currentSecret()): Promise<CryptoKey> {
   const hash = await crypto.subtle.digest("SHA-256", enc.encode(secret));
   return crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
