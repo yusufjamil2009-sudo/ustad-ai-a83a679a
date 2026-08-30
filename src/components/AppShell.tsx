@@ -8,11 +8,11 @@ import {
   BellRing,
   Boxes,
   Settings,
-  Sparkles,
   ClipboardList,
 } from "lucide-react";
 import { useGuest, shortId } from "@/lib/ustad-client";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { UstadLogo } from "@/components/UstadLogo";
 
 const NAV = [
   { to: "/", label: "Chat", icon: MessageSquare },
