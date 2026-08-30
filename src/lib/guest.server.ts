@@ -80,11 +80,18 @@ export async function verifyToken(token: unknown): Promise<string | null> {
   if (!sig) return null;
   // New 3-part tokens sign guestId.expiry so the expiry is tamper-proof.
   const signed = exp !== undefined ? `${guestId}.${parts[1]}` : guestId!;
-  const expected = await signPayload(signed);
-  if (expected.length !== sig.length) return null;
-  let diff = 0;
-  for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
-  return diff === 0 ? guestId! : null;
+  const secrets = [currentSecret(), previousSecret()].filter(Boolean) as string[];
+  for (const secret of secrets) {
+    const expected = await signPayload(signed, secret);
+    if (expected.length !== sig.length) continue;
+    let diff = 0;
+    for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+    // Tokens signed with the PREVIOUS secret stay valid during the rotation
+    // window; the client is re-issued a token signed with the current secret
+    // on its next bootstrap, so no guest ever loses their data on a rotation.
+    if (diff === 0) return guestId!;
+  }
+  return null;
 }
 
 const GUEST_COOKIE = "ustad.guest";
