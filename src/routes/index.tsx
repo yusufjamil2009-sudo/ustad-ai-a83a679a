@@ -489,7 +489,22 @@ function ChatPage() {
           <div className="hide-scrollbar flex-1 space-y-4 overflow-y-auto px-3 py-6 md:px-8">
             {messages.length === 0 ? (
               <div className="mx-auto max-w-xl py-14 text-center">
-                <h2 className="text-2xl font-semibold gold-text">Assalamu alaikum 👋</h2>
+                <UstadLogo
+                  className="mx-auto mb-4 size-16 sm:size-20 md:size-24"
+                  priority
+                />
+                <h1 className="font-display text-lg font-bold tracking-[0.18em] uppercase gold-text sm:text-xl">
+                  Welcome to USTAD AI
+                </h1>
+                <p
+                  className="mt-2 text-xl font-semibold break-words text-foreground sm:text-2xl"
+                  aria-live="polite"
+                >
+                  {greeting.text}{" "}
+                  <span aria-hidden="true" className="text-[0.9em]">
+                    {greeting.emoji}
+                  </span>
+                </p>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Kuch bhi poocho — padhai, coding, web se latest info, image samajhna, ya exam
                   banwana.
