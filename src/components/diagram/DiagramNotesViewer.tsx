@@ -60,6 +60,7 @@ export function DiagramNotesViewer({
     Array<{ name: string; what: string; does: string; why: string }>
   >([]);
   const [notePngs, setNotePngs] = useState<string[]>([]);
+  const [imageUrl, setImageUrl] = useState<string>("");
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const { token } = useGuest();
@@ -68,6 +69,7 @@ export function DiagramNotesViewer({
     if (!open) {
       setSvg("");
       setNotePngs([]);
+      setImageUrl("");
       setError(null);
       setZoom(1);
       return;
@@ -78,21 +80,42 @@ export function DiagramNotesViewer({
     (async () => {
       try {
         if (mode === "diagram") {
-          const spec = (await diagramSpecFn({
-            data: {
-              token: token ?? "",
-              question,
-              answer,
-              language,
-              allowProvider: true,
-              allowImage: true,
-            } as never,
-          })) as unknown as import("@/lib/diagrams/spec").DiagramSpec;
-          if (cancelled) return;
-          const rendered = renderSvg(spec);
-          setSvg(rendered.svg);
-          setTitle(spec.title);
-          setExplanation(spec.explanation ?? []);
+          // 1. REAL generated educational image (diagram + labels + arrows + notes).
+          let imaged = false;
+          try {
+            const img = (await diagramImageFn({
+              data: { token: token ?? "", question, answer, language } as never,
+            })) as unknown as { dataUrl: string; title: string };
+            if (cancelled) return;
+            if (img?.dataUrl) {
+              setImageUrl(img.dataUrl);
+              setTitle(img.title || question);
+              imaged = true;
+            }
+          } catch (e) {
+            if (!imaged) setError((e as Error).message || "Image generation failed.");
+          }
+          // 2. Structured spec: part-by-part explanation, and the browser SVG
+          //    fallback only when no real image could be generated.
+          try {
+            const spec = (await diagramSpecFn({
+              data: {
+                token: token ?? "",
+                question,
+                answer,
+                language,
+                allowProvider: true,
+                allowImage: false,
+              } as never,
+            })) as unknown as import("@/lib/diagrams/spec").DiagramSpec;
+            if (cancelled) return;
+            if (!imaged) setSvg(renderSvg(spec).svg);
+            if (!imaged) setTitle(spec.title);
+            setExplanation(spec.explanation ?? []);
+            if (imaged) setError(null);
+          } catch (e) {
+            if (!imaged) throw e;
+          }
         } else {
           const content = buildNotesContent(question, answer);
           const pages = await renderNotesCanvases(content, null);
