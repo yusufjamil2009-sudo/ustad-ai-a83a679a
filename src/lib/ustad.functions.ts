@@ -257,6 +257,14 @@ export const diagramSpecFn = createServerFn({ method: "POST" })
     }),
   );
 
+export const diagramImageFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (d: { token: string; question: string; answer: string; language: Language }) => d,
+  )
+  .handler(async ({ data: d }) =>
+    diagramImage.generateDiagramImage(d.token, d.question, d.answer, d.language),
+  );
+
 /* ---- book + chapter knowledge (Part 2) ---- */
 
 export const extractChapterFn = createServerFn({ method: "POST" })
