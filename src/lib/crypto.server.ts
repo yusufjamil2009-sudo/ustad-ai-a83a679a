@@ -48,12 +48,24 @@ export async function encryptString(plain: string): Promise<string> {
 export async function decryptString(payload: string): Promise<string> {
   if (!payload.startsWith("v1:")) return payload;
   const [, ivB64, ctB64] = payload.split(":");
-  const pt = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromB64(ivB64!) },
-    await aesKey(),
-    fromB64(ctB64!),
+  const secrets = [currentSecret(), previousSecret()].filter(Boolean) as string[];
+  let lastError: unknown;
+  for (const secret of secrets) {
+    try {
+      const pt = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: fromB64(ivB64!) },
+        await aesKey(secret),
+        fromB64(ctB64!),
+      );
+      return dec.decode(pt);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw new Error(
+    "Stored credential could not be decrypted with the current or previous encryption secret. Re-enter the provider API key in Settings.",
+    { cause: lastError },
   );
-  return dec.decode(pt);
 }
 
 export async function encryptConfig(
