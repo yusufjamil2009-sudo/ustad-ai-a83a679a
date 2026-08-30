@@ -75,6 +75,7 @@ export const refreshCurriculumFn = wrap(fns.refreshCurriculumFn);
 
 /* ---- diagram + handwritten notes ---- */
 export const diagramSpecFn = wrap(fns.diagramSpecFn);
+export const diagramImageFn = wrap(fns.diagramImageFn);
 
 /* ---- book + chapter knowledge (Part 2) ---- */
 export const extractChapterFn = wrap(fns.extractChapterFn);

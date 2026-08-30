@@ -6,6 +6,7 @@ import * as study from "./study.server";
 import * as voice from "./voice.server";
 import * as curriculum from "./curriculum.server";
 import * as diagram from "./diagram.server";
+import * as diagramImage from "./diagram-image.server";
 import * as bookKnowledge from "./book-knowledge.server";
 import * as chapterMaster from "./chapter-master.server";
 import * as chapterLesson from "./chapter-lesson.server";
@@ -254,6 +255,14 @@ export const diagramSpecFn = createServerFn({ method: "POST" })
       ...(d.allowProvider !== undefined ? { allowProvider: d.allowProvider } : {}),
       ...(d.allowImage !== undefined ? { allowImage: d.allowImage } : {}),
     }),
+  );
+
+export const diagramImageFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (d: { token: string; question: string; answer: string; language: Language }) => d,
+  )
+  .handler(async ({ data: d }) =>
+    diagramImage.generateDiagramImage(d.token, d.question, d.answer, d.language),
   );
 
 /* ---- book + chapter knowledge (Part 2) ---- */
