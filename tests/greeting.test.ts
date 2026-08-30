@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import test from "node:test";
+import assert from "node:assert/strict";
 import {
   greetingSlot,
   buildGreeting,
@@ -6,12 +7,12 @@ import {
   resolveGreetingLanguage,
   msUntilNextBoundary,
   greetingFromSnapshot,
-} from "@/lib/greeting";
-import { snapshot } from "@/lib/chrono-engine";
+} from "../src/lib/greeting";
+import { snapshot } from "../src/lib/chrono-engine";
 
 const at = (h: number, m = 0) => snapshot(new Date(Date.UTC(2026, 0, 15, h, m)), "UTC");
 
-describe("greeting slots", () => {
+test("greeting slots use exact 05/12/17/21 boundaries", () => {
   const cases: Array<[number, string]> = [
     [5, "morning"],
     [11, "morning"],
@@ -24,66 +25,61 @@ describe("greeting slots", () => {
     [3, "night"],
     [4, "night"],
   ];
-  for (const [h, slot] of cases) {
-    it(`${h}:00 -> ${slot}`, () => expect(greetingSlot(h)).toBe(slot));
+  for (const [h, slot] of cases) assert.equal(greetingSlot(h), slot);
+  assert.equal(greetingFromSnapshot(at(11, 59), "Yusuf").slot, "morning");
+  assert.equal(greetingFromSnapshot(at(12, 0), "Yusuf").slot, "afternoon");
+  assert.equal(greetingFromSnapshot(at(16, 59), "Yusuf").slot, "afternoon");
+  assert.equal(greetingFromSnapshot(at(20, 59), "Yusuf").slot, "evening");
+  assert.equal(greetingFromSnapshot(at(4, 59), "Yusuf").slot, "night");
+  assert.equal(greetingFromSnapshot(at(5, 0), "Yusuf").slot, "morning");
+});
+
+test("profile name is used and junk names are dropped", () => {
+  assert.equal(buildGreeting("morning", "Yusuf").text, "Good morning Yusuf");
+  assert.equal(buildGreeting("morning", "Ali").text, "Good morning Ali");
+  const bad: unknown[] = [
+    undefined,
+    null,
+    {},
+    NaN,
+    "",
+    "   ",
+    "undefined",
+    "null",
+    "NaN",
+    "[object Object]",
+    "{name}",
+  ];
+  for (const b of bad) {
+    const g = buildGreeting("morning", b);
+    assert.equal(g.text, "Good morning");
+    assert.ok(!/undefined|null|NaN|object|\{/.test(g.text));
   }
-  it("11:59 stays morning, 12:00 flips", () => {
-    expect(greetingFromSnapshot(at(11, 59), "Yusuf").slot).toBe("morning");
-    expect(greetingFromSnapshot(at(12, 0), "Yusuf").slot).toBe("afternoon");
-  });
-  it("04:59 night, 05:00 morning", () => {
-    expect(greetingFromSnapshot(at(4, 59), "Yusuf").slot).toBe("night");
-    expect(greetingFromSnapshot(at(5, 0), "Yusuf").slot).toBe("morning");
-  });
+  assert.equal(sanitizeName("  Muhammad   Abdul  Rahman Khan "), "Muhammad Abdul Rahman Khan");
+  assert.equal(sanitizeName("Aïsha-Zoë"), "Aïsha-Zoë");
 });
 
-describe("names", () => {
-  it("uses profile name", () => {
-    expect(buildGreeting("morning", "Yusuf").text).toBe("Good morning Yusuf");
-    expect(buildGreeting("morning", "Ali").text).toBe("Good morning Ali");
-  });
-  it("drops junk names", () => {
-    for (const bad of [undefined, null, {}, "", "   ", "undefined", "null", "NaN", "[object Object]", "{name}"]) {
-      const g = buildGreeting("morning", bad as unknown);
-      expect(g.text).toBe("Good morning");
-      expect(g.text).not.toMatch(/undefined|null|NaN|object|\{/);
-    }
-  });
-  it("normalises whitespace and unusual characters", () => {
-    expect(sanitizeName("  Muhammad   Abdul  Rahman Khan ")).toBe("Muhammad Abdul Rahman Khan");
-    expect(sanitizeName("Aïsha-Zoë")).toBe("Aïsha-Zoë");
-  });
+test("existing language system drives the greeting language", () => {
+  assert.equal(resolveGreetingLanguage("english"), "english");
+  assert.equal(resolveGreetingLanguage("hindi"), "hindi");
+  assert.equal(resolveGreetingLanguage("hinglish"), "hinglish");
+  assert.equal(resolveGreetingLanguage(undefined), "english");
+  assert.equal(buildGreeting("morning", "Yusuf", "english").text, "Good morning Yusuf");
+  assert.equal(buildGreeting("morning", "Yusuf", "hinglish").text, "Good morning Yusuf");
+  assert.equal(buildGreeting("morning", "Yusuf", "hindi").text, "सुप्रभात Yusuf");
+  assert.equal(buildGreeting("night", "Yusuf", "hindi").text, "शुभ रात्रि Yusuf");
 });
 
-describe("language", () => {
-  it("maps existing settings languages", () => {
-    expect(resolveGreetingLanguage("english")).toBe("english");
-    expect(resolveGreetingLanguage("hindi")).toBe("hindi");
-    expect(resolveGreetingLanguage("hinglish")).toBe("hinglish");
-    expect(resolveGreetingLanguage(undefined)).toBe("english");
-  });
-  it("renders per language, keeping the name", () => {
-    expect(buildGreeting("morning", "Yusuf", "english").text).toBe("Good morning Yusuf");
-    expect(buildGreeting("morning", "Yusuf", "hinglish").text).toBe("Good morning Yusuf");
-    expect(buildGreeting("morning", "Yusuf", "hindi").text).toBe("सुप्रभात Yusuf");
-    expect(buildGreeting("night", "Yusuf", "hindi").text).toBe("शुभ रात्रि Yusuf");
-  });
+test("emoji matches the slot", () => {
+  assert.equal(buildGreeting("morning", "").emoji, "☀️");
+  assert.equal(buildGreeting("afternoon", "").emoji, "🌤️");
+  assert.equal(buildGreeting("evening", "").emoji, "🌇");
+  assert.equal(buildGreeting("night", "").emoji, "🌙");
 });
 
-describe("emoji", () => {
-  it("matches the slot", () => {
-    expect(buildGreeting("morning", "").emoji).toBe("☀️");
-    expect(buildGreeting("afternoon", "").emoji).toBe("🌤️");
-    expect(buildGreeting("evening", "").emoji).toBe("🌇");
-    expect(buildGreeting("night", "").emoji).toBe("🌙");
-  });
-});
-
-describe("boundary scheduling", () => {
-  it("waits until the next boundary, never polls", () => {
-    expect(msUntilNextBoundary(at(11, 0))).toBe(60 * 60_000);
-    expect(msUntilNextBoundary(at(12, 30))).toBe(4.5 * 60 * 60_000);
-    expect(msUntilNextBoundary(at(22, 0))).toBe(7 * 60 * 60_000);
-    expect(msUntilNextBoundary(at(4, 0))).toBe(60 * 60_000);
-  });
+test("boundary scheduling waits, never polls", () => {
+  assert.equal(msUntilNextBoundary(at(11, 0)), 60 * 60_000);
+  assert.equal(msUntilNextBoundary(at(12, 30)), 4.5 * 60 * 60_000);
+  assert.equal(msUntilNextBoundary(at(22, 0)), 7 * 60 * 60_000);
+  assert.equal(msUntilNextBoundary(at(4, 0)), 60 * 60_000);
 });
