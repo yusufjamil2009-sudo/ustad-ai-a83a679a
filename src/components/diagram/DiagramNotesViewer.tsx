@@ -169,7 +169,41 @@ export function DiagramNotesViewer({
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          {mode === "diagram" ? (
+          {mode === "diagram" && imageUrl ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = imageUrl;
+                  a.download = `${fileStem}.png`;
+                  a.click();
+                }}
+              >
+                <Download className="mr-1 size-3.5" /> PNG
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    const blob = await (await fetch(imageUrl)).blob();
+                    const r = await shareFile(blob, `${fileStem}.png`);
+                    toast[r === "shared" ? "success" : "info"](
+                      r === "shared" ? "Shared." : "Downloaded to share.",
+                    );
+                  } catch {
+                    toast.error("Sharing failed.");
+                  }
+                }}
+              >
+                <Share2 className="mr-1 size-3.5" /> Share
+              </Button>
+            </>
+          ) : mode === "diagram" ? (
             <>
               <Button
                 size="sm"
