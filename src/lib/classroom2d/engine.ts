@@ -1,12 +1,15 @@
-/** Master orchestrator — wires every classroom engine into one live, interactive 3D teaching environment. */
-import * as THREE from "three";
-import { AssetEngine } from "./assets";
+/**
+ * Master classroom orchestrator — wires every engine into one live 2D teaching
+ * environment (board + teacher + timeline + voice + audio).
+ *
+ * The 3D renderer, camera rig, lighting, physics and XR subsystems were removed:
+ * the classroom is now a real 2D educational stage. Everything ABOVE this file
+ * (Master Teaching Orchestrator, TimelineEngine, lesson builder, voice, doubt
+ * flow, persistence) is unchanged — only the rendering layer swapped.
+ */
 import { AudioEngine } from "./audio";
-import { BoardEngine, mathify } from "./board";
-import { CameraEngine, type RatioMode } from "./cameras";
-import { buildClassroom, type ClassroomRefs } from "./classroom";
+import { BoardEngine, mathify, type BoardTheme } from "./board";
 import { formatClock, SECOND } from "./chrono";
-import { InteractionEngine } from "./interaction";
 import {
   classifyDoubt,
   buildDoubtAnswer,
@@ -14,24 +17,21 @@ import {
   buildDoubtStepsFromAnswer,
   type LessonLang,
 } from "./lesson";
-import { MaterialLibrary } from "./materials";
-import { LightingEngine } from "./lighting";
-import { ObjectEngine } from "./objects";
 import { PerformanceEngine } from "./performance";
-import { PhysicsEngine } from "./physics";
-import { RenderEngine } from "./renderer";
+import { Stage2D, type RatioMode } from "./stage";
 import { StateEngine } from "./state";
-import { TeacherEngine } from "./teacher";
+import { Teacher2D, type StageAnchor } from "./teacher2d";
 import { TimelineEngine } from "./timeline";
 import {
-  isDiagram3D,
   PHASE_LABEL,
+  type BoardOp,
+  type DiagramKind,
   type LessonPlan,
   type LessonStep,
+  type Object3DKind,
   type QualityTier,
 } from "./types";
 import { VoiceInputEngine, VOICE_UNAVAILABLE_MESSAGE } from "./voice";
-import { XREngine } from "./xr";
 import {
   saveSession,
   loadLatestSession,
@@ -40,82 +40,76 @@ import {
   classroomGuestId,
   validateSessionOwnership,
   type ClassroomSessionSnapshot,
-  type ClassroomResumeSnapshot,
+  type SceneObjectSnapshot,
 } from "./session";
-import type { VisualAvailability } from "../teaching/field-trip";
-import { fieldTripStatusFromVisual } from "../teaching/field-trip";
 
-const OBJECT_ANCHOR = new THREE.Vector3(2.2, 1.25, -4.2);
+export type { RatioMode };
+
+/**
+ * A lesson beat's semantic visual becomes a real labelled BOARD diagram.
+ * Anything without an honest diagram falls back to "generic" (a titled box)
+ * rather than a fabricated science figure.
+ */
+const OBJECT_DIAGRAM: Record<Object3DKind, DiagramKind> = {
+  plant: "plant",
+  sun: "sun",
+  molecule: "molecule",
+  globe: "earth",
+  cube: "solid",
+  book: "generic",
+  flask: "lab",
+  monument: "generic",
+  heart: "heart",
+  atom3d: "atom",
+  bars3d: "bar",
+  cycle3d: "cycle",
+  triangle3d: "triangle",
+  pyramid3d: "pyramid",
+  dna3d: "dna",
+};
 
 export class ClassroomEngine {
   readonly state = new StateEngine();
-  private render!: RenderEngine;
-  private cameras!: CameraEngine;
-  private lighting!: LightingEngine;
-  private room!: ClassroomRefs;
-  private teacher!: TeacherEngine;
+  private stage = new Stage2D();
   private board!: BoardEngine;
-  private objects!: ObjectEngine;
-  private materials!: MaterialLibrary;
-  private assets = new AssetEngine();
+  private teacher!: Teacher2D;
   private voice = new VoiceInputEngine();
   private audio = new AudioEngine();
-  private physics = new PhysicsEngine();
   private perf = new PerformanceEngine();
   private timeline = new TimelineEngine();
+  /** Semantic visuals currently pinned on the board, by step-declared id. */
+  private visuals = new Map<string, { kind: Object3DKind; labels: string[]; visible: boolean }>();
+
   /**
    * Strict voice ↔ write synchronisation. Every beat gets a narration token;
    * only the token that matches the current beat may start speaking, may report
-   * speech start/end to the timeline, or may be flushed by the pen. Narration
-   * for a writing beat is held until the hand actually puts chalk on the board,
-   * so the voice can never run ahead of — or skip — a teaching phase.
+   * speech start/end to the timeline, or may be flushed by the pen.
    */
   private narrationToken = 0;
   private speakingToken = -1;
   private pendingSay: { token: number; text: string } | null = null;
   private sayTimer: number | null = null;
-  private interaction!: InteractionEngine;
-  private xr!: XREngine;
 
   private raf = 0;
   private clock = 0;
   private disposed = false;
   private ro: ResizeObserver | null = null;
-  /** HUD emission bucket (2 Hz) — the render loop must never setState per frame. */
   private hudBucket = -1;
-  /** last container size seen by the resize handler (prevents redundant resizes) */
   private lastResize = { w: -1, h: -1 };
-  /** reusable pen-tip world point (board pen callback runs every frame while writing) */
-  private penPoint = new THREE.Vector3();
   private plan: LessonPlan | null = null;
-  /** Teaching language for board text, narration and voice input. */
   private lang: LessonLang | null = null;
-  /**
-   * Stable session/lesson identity (Section 27). Survives refresh so the
-   * classroom can resume the exact lesson instead of resetting to Photosynthesis.
-   */
+
   sessionId: string = newSessionId();
   lessonId: string = newLessonId();
-  /** Guest that owns persisted snapshots. Never taken from the request body. */
   private guestId = "";
   private mediaRecorder: MediaRecorder | null = null;
   private mediaStream: MediaStream | null = null;
-  /** Most recent thing the TEACHER narrated — never the student's question (Bug 7). */
   private lastTeacherSpeech = "";
-  /** Most recent student doubt, kept separate from teacher narration. */
   private lastStudentQuestion = "";
   private recentStudentQuestions: string[] = [];
-  /** Pending AI doubt answer in flight (prevents duplicate requests on retry). */
   private doubtInFlight: string | null = null;
-  /**
-   * Monotonic token for async AI doubt requests (Section 47). A response from
-   * an older lesson/topic is ignored if the user changed lesson, switched
-   * chapter or started a different doubt before it returned.
-   */
   private doubtToken = 0;
   private persistQueued = false;
-  /** Classroom lesson parked while VIRTUAL_FIELD_TRIP is active. */
-  private classroomResume: ClassroomResumeSnapshot | undefined = undefined;
 
   setGuestId(guestId: string): void {
     this.guestId = guestId.trim();
@@ -125,49 +119,23 @@ export class ClassroomEngine {
     return this.guestId || classroomGuestId();
   }
 
-  async init(canvas: HTMLCanvasElement, container: HTMLElement): Promise<void> {
-    const quality = this.perf.tier;
-    this.render = new RenderEngine(canvas, quality);
-    const aspect0 = container.clientWidth / Math.max(1, container.clientHeight);
-    this.cameras = new CameraEngine(aspect0);
-    this.lighting = new LightingEngine(this.render.scene, quality);
-    this.materials = new MaterialLibrary(quality, this.render.maxAnisotropy);
-    this.room = buildClassroom(this.render.scene, this.materials);
-    this.board = new BoardEngine(this.render.maxAnisotropy);
-    this.board.setQuality(quality);
-    this.render.scene.add(this.board.mesh);
-    this.teacher = new TeacherEngine(this.render.scene, this.room.anchors.center.clone());
-    this.objects = new ObjectEngine(
-      this.render.scene,
-      (obj) => this.physics.addDynamicBox(obj, 0.28, 0.8),
-      (obj) => this.physics.removeMesh(obj),
-    );
-    this.xr = new XREngine(this.render.renderer);
+  /** Boot the 2D classroom into `container`. */
+  async init(container: HTMLElement): Promise<void> {
+    this.board = new BoardEngine();
+    this.teacher = new Teacher2D();
+    this.stage.mount(container, this.board.canvas, this.teacher.canvas);
 
-    // RESPONSIVE FRAMING: publish the real board + teacher geometry so the
-    // camera solves a framing that fits both, at any aspect ratio (§4/§29).
-    this.publishFraming();
-
-    this.audio.attach(this.cameras.camera);
     this.board.onChalk = () => this.audio.sfx("chalk");
 
     /**
-     * ROOT-CAUSE FIX — the board's live pen tip was never connected to the
-     * teacher: the hand IK had no write target, so writing and hand were two
-     * unrelated animations. The pen tip now drives the hand every frame, and
-     * the teacher shuffles along the board so the target stays inside real
-     * arm reach instead of the arm stretching to it.
+     * The board's live pen tip drives the teacher's hand every frame, so the
+     * writing and the hand are ONE motion instead of two unrelated animations.
      */
     this.board.onPenMove = (x, y) => {
-      const p = this.board.pointToWorld(x, y, this.penPoint);
-      this.teacher.writeAt(p);
-      if (this.teacher.animation !== "walk" && this.teacher.animation !== "write")
+      const vp = this.board.pointToViewport(x, y);
+      this.teacher.writeAt(this.stage.boardToStage(vp.u, vp.v));
+      if (this.teacher.animation !== "walk" && this.teacher.animation !== "write") {
         this.teacher.play("write");
-      const dx = p.x - this.teacher.position.x;
-      if (Math.abs(dx) > 1.0 && this.teacher.animation !== "walk") {
-        this.teacher.walkTo(
-          new THREE.Vector3(THREE.MathUtils.clamp(p.x - Math.sign(dx) * 0.35, -2.6, 2.6), 0, -5.15),
-        );
       }
       this.state.set({ writing: true });
       // chalk is on the board → the held narration for this beat may start now
@@ -184,7 +152,6 @@ export class ClassroomEngine {
 
     // the timeline may not leave a beat while its board writing is unfinished
     this.timeline.isBoardBusy = () => this.board.busy;
-    this.render.initPost(this.cameras.camera);
 
     // voice input (student doubts)
     this.voice.onStart = () => this.state.set({ listening: true, transcript: "" });
@@ -194,23 +161,9 @@ export class ClassroomEngine {
       this.state.set({ listening: false, voiceError: message || "Microphone error" });
     this.voice.onFinal = (t) => {
       this.state.set({ listening: false, transcript: t });
-      this.askDoubt(t);
+      void this.askDoubt(t);
     };
-    this.state.set({ voiceSupported: this.voice.supported });
-
-    // asset engine progress feeds the loading bar
-    this.assets.onProgress = (r) => this.state.set({ loading: 0.85 + r * 0.15 });
-
-    this.state.set({ quality, loading: 0.35 });
-
-    // interaction
-    this.interaction = new InteractionEngine(canvas, this.cameras, {
-      onPick: (obj, point) => this.handlePick(obj, point),
-      onToggle: () => this.toggle(),
-      onNext: () => this.timeline.next(),
-      onPrev: () => this.timeline.prev(),
-    });
-    this.interaction.targets = [...this.room.interactables, this.board.mesh, this.teacher.group];
+    this.state.set({ voiceSupported: this.voice.supported, loading: 0.5 });
 
     // timeline wiring
     this.timeline.onStep = (step, index) => this.applyStep(step, index);
@@ -222,7 +175,7 @@ export class ClassroomEngine {
       this.state.bus.emit("finished", { topic: plan.topic });
     };
 
-    // audio → teacher lipsync + timeline gating (token-guarded, see narrationToken)
+    // audio → teacher lipsync + timeline gating (token-guarded)
     this.audio.onSpeakStart = () => {
       if (this.speakingToken !== this.narrationToken) return;
       this.teacher.setSpeaking(true);
@@ -233,51 +186,25 @@ export class ClassroomEngine {
       this.teacher.setSpeaking(false);
       this.timeline.notifySpeechEnd();
     };
-    this.audio.onSpeechUnavailable = (reason) => {
-      this.state.set({ error: reason });
-    };
+    this.audio.onSpeechUnavailable = (reason) => this.state.set({ error: reason });
 
-    // adaptive quality
-    this.perf.onQualityChange = (q) => this.setQuality(q);
-
-    this.state.set({ loading: 0.6 });
-
-    // physics (WASM) — optional; scene still works if it fails
-    try {
-      await this.physics.init();
-      this.physics.createCharacter(this.teacher.position.clone());
-    } catch {
-      this.state.set({ error: null });
-    }
-    // StrictMode / fast navigation safety: if dispose() ran while the WASM
-    // module was loading, stop here — never register new listeners after disposal.
-    if (this.disposed) return;
-
-    this.state.set({ loading: 0.85 });
-    void this.xr.detect().then((s) => this.state.set({ xrSupported: s }));
-
-    // resize — guarded: expensive buffer/projection/typography work happens only
-    // when the container's pixel size ACTUALLY changed (no resize loops, no
-    // layout thrashing from redundant ResizeObserver ticks).
+    // responsive stage — recompute only on a REAL pixel-size change
     const resize = () => {
       const w = container.clientWidth;
       const h = Math.max(1, container.clientHeight);
       if (w === this.lastResize.w && h === this.lastResize.h) return;
       this.lastResize.w = w;
       this.lastResize.h = h;
-      this.render.resize(w, h);
-      const aspect = w / h;
-      this.publishFraming();
-      this.cameras.setAspect(aspect, PerformanceEngine.isMobile());
-      // board typography adapts to the real stage size, independent of 3D quality
-      this.board.setViewport(w, h, aspect < 1);
-      this.state.set({ portrait: this.cameras.isPortrait });
+      const rects = this.stage.layout();
+      this.board.setViewport(rects.board.w, rects.board.h, rects.portrait);
+      this.state.set({ portrait: rects.portrait });
     };
     resize();
     this.ro = new ResizeObserver(resize);
     this.ro.observe(container);
 
-    this.state.set({ ready: true, loading: 1 });
+    if (this.disposed) return;
+    this.state.set({ ready: true, loading: 1, quality: this.perf.tier });
     this.loop();
   }
 
@@ -288,10 +215,6 @@ export class ClassroomEngine {
     return this.loadPlan(buildLessonPlan(topic, this.lang ?? undefined));
   }
 
-  /**
-   * Language engine: the user's saved preference wins over topic auto-detection,
-   * so board text, narration voice and speech recognition all stay in one language.
-   */
   setLanguage(lang: LessonLang): void {
     this.lang = lang;
     this.audio.setLang(lang === "hindi" ? "hi-IN" : "en-IN");
@@ -299,15 +222,13 @@ export class ClassroomEngine {
     this.state.set({ lang });
   }
 
-  /** Load an already-built lesson plan (e.g. generated in Study Studio). */
   loadPlan(plan: LessonPlan, identity?: { sessionId?: string; lessonId?: string }): LessonPlan {
     this.plan = plan;
-    // A new lesson invalidates any in-flight async doubt answer (Section 47).
     this.doubtToken++;
     if (identity?.sessionId) this.sessionId = identity.sessionId;
     if (identity?.lessonId) this.lessonId = identity.lessonId;
-    this.board.apply({ op: "clear" });
-    this.objects.clear();
+    this.board?.apply({ op: "clear" });
+    this.visuals.clear();
     this.timeline.load(plan);
     this.state.set({
       topic: plan.topic,
@@ -323,11 +244,6 @@ export class ClassroomEngine {
     return plan;
   }
 
-  /**
-   * Attempt to restore an active lesson from a persisted session (refresh
-   * recovery, Section 28). Returns true when a lesson was restored; the caller
-   * should NOT then default-load "Photosynthesis".
-   */
   restoreSession(snapshot?: ClassroomSessionSnapshot | null): boolean {
     const gid = this.ownerGuestId();
     const snap = snapshot ?? loadLatestSession(gid);
@@ -337,8 +253,8 @@ export class ClassroomEngine {
     this.sessionId = snap.sessionId;
     this.lessonId = snap.lessonId;
     this.plan = snap.timeline.plan;
-    this.board.apply({ op: "clear" });
-    this.objects.clear();
+    this.board?.apply({ op: "clear" });
+    this.visuals.clear();
     this.timeline.restore(snap.timeline);
     this.state.set({
       topic: snap.topic,
@@ -346,54 +262,54 @@ export class ClassroomEngine {
       stepCount: snap.timeline.plan.steps.length,
       caption: "",
       playing: false,
-      // Bug #8: never auto-play audio after refresh (browser autoplay policy).
-      // Restore exact position; UI offers Resume Teaching when snap.playing.
+      // never auto-play audio after refresh (browser autoplay policy)
       needsResume: Boolean(snap.playing),
       doubt: Boolean(snap.doubt),
       durationMs: snap.timeline.chrono.durationMs,
       elapsedMs: snap.timeline.chrono.elapsedMs,
       camera: "teaching",
-      lifecycle: snap.orchestrator?.lifecycle ?? (snap.playing ? "paused" : "paused"),
+      lifecycle: snap.orchestrator?.lifecycle ?? "paused",
       teachingMode: snap.orchestrator?.teachingMode ?? "classroom",
       completedConcepts: snap.orchestrator?.completedConcepts ?? [],
       sourceType: snap.orchestrator?.sourceType ?? null,
       studentLevel: snap.orchestrator?.studentLevel ?? null,
-      fieldTripId: snap.orchestrator?.fieldTripId ?? null,
-      fieldTripPoi: snap.orchestrator?.fieldTripPoi ?? "",
-      fieldTripStatus: snap.orchestrator?.fieldTripStatus ?? null,
-      fieldTripVisual: snap.orchestrator?.fieldTripVisual ?? null,
     });
-    this.classroomResume = snap.classroomResume;
-    this.lighting?.setFieldTripMood(snap.orchestrator?.teachingMode === "virtual_field_trip");
     this.state.bus.emit("plan", snap.timeline.plan);
-    // Restore the exact semantic board state if one was persisted; otherwise
-    // rebuild it by replaying every step up to the current one.
-    if (snap.board) {
-      // §26/§54: an unreadable/legacy board snapshot falls back to the semantic
-      // replay — restore never silently loses the lesson's board.
+    if (snap.board && this.board) {
       if (!this.board.restore(snap.board)) {
         this.replayBoardUpTo(Math.max(0, snap.timeline.index));
       }
     } else {
       this.replayBoardUpTo(Math.max(0, snap.timeline.index));
     }
-    // Restore 3D objects, teacher pose and camera (Bugs 11, 35).
     if (snap.scene) {
-      this.objects.restore(snap.scene.objects);
-      this.teacher.restore(snap.scene.teacher);
-      this.cameras.restore(snap.scene.camera);
+      for (const o of snap.scene.objects) {
+        this.visuals.set(o.id, { kind: o.kind, labels: o.labels, visible: o.visible });
+      }
+      this.teacher?.restore(snap.scene.teacher);
+      if (snap.scene.stage) {
+        this.setBoardTheme(snap.scene.stage.theme);
+        this.setRatioMode(snap.scene.stage.ratio);
+      }
       if (snap.scene.lastTeacherSpeech) this.lastTeacherSpeech = snap.scene.lastTeacherSpeech;
     }
     if (snap.doubt?.question) this.lastStudentQuestion = snap.doubt.question;
     return true;
   }
 
-  /** Persist the current session now (public hook for state-driven persistence). */
   persistSession(): void {
     this.persist();
   }
 
-  /** Persist the current session to durable storage (best-effort, throttled). */
+  private sceneObjects(): SceneObjectSnapshot[] {
+    return [...this.visuals.entries()].map(([id, v]) => ({
+      id,
+      kind: v.kind,
+      labels: v.labels,
+      visible: v.visible,
+    }));
+  }
+
   private persist(): void {
     if (typeof window === "undefined" || !this.plan) return;
     if (this.persistQueued) return;
@@ -412,7 +328,7 @@ export class ClassroomEngine {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         timeline: tlSnap,
-        board: this.board.snapshot(),
+        board: this.board?.snapshot() ?? null,
         playing: this.timeline.playing,
         doubt: this.timeline.isInDoubtBranch
           ? {
@@ -422,9 +338,13 @@ export class ClassroomEngine {
             }
           : null,
         scene: {
-          objects: this.objects.snapshot(),
-          teacher: this.teacher.snapshot(),
-          camera: this.cameras.snapshot(),
+          objects: this.sceneObjects(),
+          teacher: this.teacher?.snapshot() ?? { animation: "idle", anchor: "center", facing: 1 },
+          stage: {
+            theme: this.state.get().boardTheme,
+            ratio: this.stage.ratioMode,
+            scroll: this.board?.scroll ?? 0,
+          },
           lastTeacherSpeech: this.lastTeacherSpeech,
         },
         orchestrator: {
@@ -433,12 +353,7 @@ export class ClassroomEngine {
           completedConcepts: this.state.get().completedConcepts,
           sourceType: this.state.get().sourceType,
           studentLevel: this.state.get().studentLevel,
-          fieldTripId: this.state.get().fieldTripId,
-          fieldTripPoi: this.state.get().fieldTripPoi,
-          fieldTripStatus: this.state.get().fieldTripStatus,
-          fieldTripVisual: this.state.get().fieldTripVisual,
         },
-        ...(this.classroomResume ? { classroomResume: this.classroomResume } : {}),
       });
     }, 400);
   }
@@ -463,7 +378,6 @@ export class ClassroomEngine {
     else this.play();
   }
 
-  /** Cancel any pending held narration so a navigated-away beat never speaks. */
   private cancelPendingSay(): void {
     this.pendingSay = null;
     if (this.sayTimer !== null) {
@@ -483,73 +397,63 @@ export class ClassroomEngine {
 
   restart(): void {
     if (!this.plan) return;
-    this.board.apply({ op: "clear" });
-    this.objects.clear();
+    this.board?.apply({ op: "clear" });
+    this.visuals.clear();
     this.timeline.load(this.plan);
     this.play();
   }
 
-  /** Set while jumping (seek/prev/restore) so applyStep rebuilds cumulative state. */
   private rebuilding = false;
 
-  private applyStep(step: LessonStep, index: number): void {
-    // On a direct jump the board/3D state must reflect everything written up to
-    // and including this beat, not just this beat's incremental ops.
-    if (this.rebuilding) this.replayBoardUpTo(index);
-    // The single teaching camera always frames the board + teacher, so no per-beat
-    // camera switching happens now. The state just reports the one camera.
-    this.state.set({ camera: "teaching" });
-    // teacher motion
-    if (step.moveTo) {
-      const anchor = this.room.anchors[step.moveTo];
-      if (anchor) this.teacher.walkTo(anchor);
+  /** Board ops a beat contributes, including its semantic visual. */
+  private opsFor(step: LessonStep): BoardOp[] {
+    const ops: BoardOp[] = [...(step.board ?? [])];
+    const vis = step.object;
+    if (!vis) return ops;
+    if (vis.action === "hide") {
+      const cur = this.visuals.get(vis.id);
+      if (cur) this.visuals.set(vis.id, { ...cur, visible: false });
+      return ops;
     }
+    this.visuals.set(vis.id, { kind: vis.kind, labels: vis.labels ?? [], visible: true });
+    // Only a first appearance draws — focus/spin re-use what is already there.
+    if (vis.action !== "show" && vis.action !== "drop") return ops;
+    if (ops.some((o) => o.op === "diagram")) return ops;
+    ops.push({
+      op: "diagram",
+      kind: OBJECT_DIAGRAM[vis.kind] ?? "generic",
+      ...(vis.labels?.length ? { labels: vis.labels } : {}),
+    });
+    return ops;
+  }
+
+  private applyStep(step: LessonStep, index: number): void {
+    if (this.rebuilding) this.replayBoardUpTo(index);
+    this.state.set({ camera: "teaching" });
+
+    // teacher motion on the 2D stage
+    if (step.moveTo) this.teacher.walkTo(step.moveTo as StageAnchor);
     if (step.teacher) this.teacher.play(step.teacher);
 
-    // IK targets — "students" aims ahead (no student meshes).
-    // The teacher still addresses the space in front of the camera.
     const focus =
       step.pointAt === "board"
-        ? this.board.mesh.position.clone()
+        ? { u: 0.55, v: 0.35 }
         : step.pointAt === "students"
-          ? new THREE.Vector3(0, 1.5, 3.4)
+          ? { u: 0.5, v: 0.92 }
           : step.pointAt === "object"
-            ? OBJECT_ANCHOR.clone()
+            ? { u: 0.8, v: 0.45 }
             : null;
     this.teacher.lookAt(focus);
     this.teacher.pointAt(step.teacher === "point" ? focus : null);
-    this.lighting.setBoardFocus(step.pointAt === "board");
 
-    // board ops
-    step.board?.forEach((op) => this.board.apply(op));
-
-    // 3D objects
-    if (step.object) {
-      const { id, kind, action, labels } = step.object;
-      if (action === "show" || action === "drop") {
-        const at = OBJECT_ANCHOR.clone();
-        if (action === "drop") at.y += 1.4;
-        this.objects.show(id, kind, at, labels ?? []);
-        this.lighting.highlightAt(at);
-      } else if (action === "hide") {
-        this.objects.hide(id);
-        this.lighting.highlightAt(null);
-      } else if (action === "spin") this.objects.spin(id, 1.5);
-      else if (action === "focus") {
-        const p = this.objects.focus(id);
-        this.lighting.highlightAt(p);
-        if (isDiagram3D(kind)) this.focusObject();
-      }
-    }
+    // board ops (including this beat's semantic diagram)
+    if (!this.rebuilding) for (const op of this.opsFor(step)) this.board.apply(op);
 
     if (step.sfx) this.audio.sfx(step.sfx);
 
     /**
-     * Narration. The BOARD is the teaching surface — the HUD only ever shows the
-     * short semantic label of the beat, never the whole explanation, so nothing
-     * covers what the teacher is writing. Narration is strictly bound to THIS
-     * beat: any speech still running from the previous phase is cancelled, and a
-     * writing beat holds its voice until the chalk actually starts moving.
+     * Narration is strictly bound to THIS beat: speech from the previous phase
+     * is cancelled, and a writing beat holds its voice until chalk really moves.
      */
     const phaseLabel = step.label ?? (step.phase ? PHASE_LABEL[step.phase] : "");
     this.state.set({ caption: phaseLabel, phase: step.phase ?? "" });
@@ -570,11 +474,7 @@ export class ClassroomEngine {
         step.board?.some((op) => op.op === "write" || op.op === "update" || op.op === "diagram"),
       );
       if (!writes) this.flushPendingSay();
-      // FAIL-SAFE ONLY (§26/§27): narration normally starts on the FIRST chalk
-      // stroke (board.onPenMove → flushPendingSay), an event — not a timeout.
-      // This short guard exists purely so voice can never be blocked when a
-      // board op produces no stroke; it never makes the voice wait for slow
-      // writing, and writing never waits for the voice.
+      // FAIL-SAFE ONLY: narration normally starts on the FIRST chalk stroke.
       else this.sayTimer = window.setTimeout(() => this.flushPendingSay(), 220);
     }
     this.state.set({ stepIndex: index, teacher: this.teacher.animation });
@@ -582,45 +482,21 @@ export class ClassroomEngine {
     this.persist();
   }
 
-  /** Publish live board + teacher bounds to the camera framing engine. */
-  private publishFraming(): void {
-    const surface = this.board.surface;
-    this.cameras.setSubject({
-      boardCenter: this.board.mesh.position.clone(),
-      boardWidth: surface.width,
-      boardHeight: surface.height,
-      teacherFootY: this.teacher.position.y,
-      teacherHeadY: this.teacher.headTopY,
-    });
-  }
-
   /**
-   * Reconstruct board + 3D object state for a given step index by replaying
-   * every prior beat's board ops silently (without sound or narration) up to
-   * and including the target. Used by direct navigation (seek/prev/restore)
-   * so the board renders the correct cumulative state. Forward play uses the
-   * natural incremental applyStep path and must not call this.
+   * Reconstruct board state for a given step index by replaying every prior
+   * beat's ops silently. Used by direct navigation (seek/prev/restore).
    */
   private replayBoardUpTo(targetIndex: number): void {
     this.board.apply({ op: "clear" });
-    this.objects.clear();
+    this.visuals.clear();
     const list = this.timeline.list;
     const upto = Math.max(0, Math.min(targetIndex, list.length - 1));
     for (let i = 0; i <= upto; i++) {
       const s = list[i]!;
-      s.board?.forEach((op) => this.board.apply(op));
-      if (s.object) {
-        const { id, kind, action, labels } = s.object;
-        if (action === "show" || action === "drop") {
-          const at = OBJECT_ANCHOR.clone();
-          if (action === "drop") at.y += 1.4;
-          this.objects.show(id, kind, at, labels ?? []);
-        } else if (action === "hide") this.objects.hide(id);
-      }
+      for (const op of this.opsFor(s)) this.board.apply(op);
     }
   }
 
-  /** Start the narration held for the current beat (pen-down or safety timeout). */
   private flushPendingSay(): void {
     const p = this.pendingSay;
     if (!p || p.token !== this.narrationToken) return;
@@ -643,84 +519,65 @@ export class ClassroomEngine {
   }
 
   setQuality(q: QualityTier): void {
-    this.render.setQuality(q);
-    // §11/§12 — decorative quality drops, board readability never does
-    this.board.setQuality(q);
-    this.lighting.setQuality(q);
-    this.materials.setQuality(q);
-    this.render.syncPost(this.cameras.camera);
     this.perf.tier = q;
-    this.state.set({ quality: q, postFx: this.render.postActive });
+    this.state.set({ quality: q });
   }
 
-  setPostFx(on: boolean): void {
-    this.render.postEnabled = on;
-    this.render.syncPost(this.cameras.camera);
-    this.state.set({ postFx: this.render.postActive });
+  /** Board surface theme — chalkboard / blackboard / whiteboard. */
+  setBoardTheme(theme: BoardTheme): void {
+    this.board?.setTheme(theme);
+    this.state.set({ boardTheme: theme });
+    this.persist();
   }
 
-  /** Aspect-ratio engine: force a true 16:9 or 9:16 composition, or follow the viewport. */
+  /** Force a true 16:9 or 9:16 composition, or follow the viewport. */
   setRatioMode(mode: RatioMode): void {
-    this.cameras.setRatioMode(mode);
-    this.state.set({ ratio: mode, portrait: this.cameras.isPortrait });
+    this.stage.setRatio(mode);
+    const rects = this.stage.layoutRects;
+    this.board?.setViewport(rects.board.w, rects.board.h, rects.portrait);
+    this.state.set({ ratio: mode, portrait: rects.portrait });
   }
 
-  /* ---------------- teaching camera lock ---------------- */
+  /* ---------------- board scrolling ---------------- */
 
-  /**
-   * TEACHING LOCK — the camera is a fixed teaching camera (default ON).
-   * While locked, pointer drags / pinch / wheel can never orbit, pan or zoom
-   * the classroom camera; only explicit controls (ratio change, Reset Teaching
-   * View, the focus feature) re-compose it.
-   */
-  setTeachingLock(on: boolean): void {
-    this.cameras.setTeachingLock(on);
-    this.interaction?.setTeachingLock(on);
-    this.state.set({ freeCamera: !on });
+  /** Scroll the board viewport (0..1 of the written content). */
+  setBoardScroll(progress: number): void {
+    if (!this.board) return;
+    const max = Math.max(0, this.board.contentHeight - this.board.surface.height);
+    this.board.scrollTo(max * Math.min(1, Math.max(0, progress)));
   }
 
-  isTeachingLocked(): boolean {
-    return this.cameras.isTeachingLocked();
+  scrollBoardBy(px: number): void {
+    if (!this.board) return;
+    this.board.scrollTo(this.board.scroll + px);
   }
 
-  /** RESET TEACHING VIEW — restore the fixed 16:9 / 9:16 teaching frame (also bound to R). */
-  resetTeachingView(): void {
-    this.cameras.resetOrbit();
-  }
-
-  /* ---------------- focus controls (single teaching camera) ---------------- */
+  /* ---------------- focus (2D emphasis, no camera) ---------------- */
 
   focusTeacher(): void {
-    this.cameras.focusOn(this.teacher.position.clone().setY(1.5));
-    this.state.set({ camera: "teaching" });
+    this.stage.root.dataset["focus"] = "teacher";
   }
 
   focusBoard(): void {
-    this.cameras.focusOn(this.board.mesh.position.clone());
-    this.state.set({ camera: "teaching" });
+    this.stage.root.dataset["focus"] = "board";
   }
 
   focusObject(): void {
-    this.cameras.focusOn(OBJECT_ANCHOR.clone());
-    this.lighting.highlightAt(OBJECT_ANCHOR.clone());
-    this.state.set({ camera: "teaching" });
+    this.stage.root.dataset["focus"] = "diagram";
   }
 
   clearFocus(): void {
-    this.cameras.focusOn(null);
-    this.lighting.highlightAt(null);
+    delete this.stage.root.dataset["focus"];
   }
 
   /* ---------------- timeline editing / seeking ---------------- */
 
-  /** Run a timeline navigation with the rebuild flag set for one applyStep. */
   private jump(fn: () => void): void {
     this.cancelPendingSay();
     this.rebuilding = true;
     try {
       fn();
     } finally {
-      // applyStep runs synchronously during goto(); clear after.
       this.rebuilding = false;
     }
     this.persist();
@@ -751,10 +608,6 @@ export class ClassroomEngine {
     this.timeline.chrono.setRate(rate);
   }
 
-  /**
-   * Insert extra beats after the current one (adaptive teaching). Uses the
-   * EXISTING timeline — not a second timeline.
-   */
   insertAdaptiveBeats(steps: LessonStep[]): void {
     if (!this.plan || !steps.length) return;
     const at = this.timeline.current + 1;
@@ -763,7 +616,6 @@ export class ClassroomEngine {
     this.persist();
   }
 
-  /** Seek to the first beat of a semantic phase. Returns false if none exist. */
   seekToPhase(phase: string): boolean {
     const i = this.timeline.list.findIndex((s) => s.phase === phase);
     if (i < 0) return false;
@@ -773,120 +625,6 @@ export class ClassroomEngine {
 
   getPlan(): LessonPlan | null {
     return this.plan;
-  }
-
-  /**
-   * Enter VIRTUAL_FIELD_TRIP on the EXISTING renderer/timeline.
-   * Parks the current classroom lesson so Return can restore it.
-   */
-  enterFieldTrip(
-    plan: LessonPlan,
-    meta: {
-      id: string;
-      available3d: boolean;
-      reason: string;
-      firstPoi: string;
-      visualMode?: VisualAvailability;
-      status?: import("../teaching/field-trip").FieldTripSceneStatus;
-    },
-  ): void {
-    if (this.plan && this.state.get().teachingMode !== "virtual_field_trip") {
-      const st = this.state.get();
-      const tl = this.timeline.snapshot();
-      this.classroomResume = {
-        sessionId: this.sessionId,
-        lessonId: this.lessonId,
-        topic: this.plan.topic,
-        lang: this.lang ?? "english",
-        timeline: tl,
-        board: this.board.snapshot(),
-        scene: {
-          objects: this.objects.snapshot(),
-          teacher: this.teacher.snapshot(),
-          camera: this.cameras.snapshot(),
-          lastTeacherSpeech: this.lastTeacherSpeech,
-        },
-        playing: this.timeline.playing,
-        doubt: this.timeline.isInDoubtBranch
-          ? {
-              question: this.doubtInFlight ?? this.lastStudentQuestion.slice(0, 200),
-              branchStepIds: tl.branchStepIds,
-              resumeIndex: tl.branchReturn ?? tl.index,
-            }
-          : null,
-        completedConcepts: [...st.completedConcepts],
-        currentConcept: st.caption,
-        studentLevel: st.studentLevel,
-        sourceType: st.sourceType,
-        lifecycle: st.lifecycle,
-        lastTeacherSpeech: this.lastTeacherSpeech,
-      };
-    }
-    const visualMode: VisualAvailability =
-      meta.visualMode ?? (meta.available3d ? "procedural_model" : "board_only");
-    const status = meta.status ?? fieldTripStatusFromVisual(visualMode);
-    this.lighting.setFieldTripMood(true);
-    this.state.set({
-      teachingMode: "virtual_field_trip",
-      fieldTripId: meta.id,
-      fieldTripPoi: meta.firstPoi,
-      fieldTripStatus: status,
-      fieldTripVisual: visualMode,
-      error: visualMode === "board_only" ? meta.reason : null,
-    });
-    this.loadPlan(plan);
-  }
-
-  /** Restore the parked classroom lesson. Returns false if there was none. */
-  exitFieldTrip(): boolean {
-    this.lighting.setFieldTripMood(false);
-    this.state.set({
-      teachingMode: "classroom",
-      fieldTripId: null,
-      fieldTripPoi: "",
-      fieldTripStatus: null,
-      fieldTripVisual: null,
-    });
-    const parked = this.classroomResume;
-    this.classroomResume = undefined;
-    if (!parked?.timeline.plan) return false;
-    this.plan = parked.timeline.plan;
-    this.lang = parked.lang;
-    this.sessionId = parked.sessionId || this.sessionId;
-    this.lessonId = parked.lessonId || this.lessonId;
-    if (parked.lastTeacherSpeech) this.lastTeacherSpeech = parked.lastTeacherSpeech;
-    this.board.apply({ op: "clear" });
-    this.objects.clear();
-    this.timeline.restore(parked.timeline);
-    this.state.set({
-      topic: parked.topic,
-      stepIndex: Math.max(0, parked.timeline.index),
-      stepCount: parked.timeline.plan.steps.length,
-      playing: false,
-      needsResume: true,
-      doubt: Boolean(parked.doubt),
-      teachingMode: "classroom",
-      completedConcepts: parked.completedConcepts,
-      studentLevel: parked.studentLevel,
-      sourceType: parked.sourceType,
-      lifecycle: parked.lifecycle === "teaching" ? "paused" : parked.lifecycle,
-      caption: parked.currentConcept,
-    });
-    if (parked.board) {
-      if (!this.board.restore(parked.board))
-        this.replayBoardUpTo(Math.max(0, parked.timeline.index));
-    }
-    if (parked.scene) {
-      this.objects.restore(parked.scene.objects);
-      this.teacher.restore(parked.scene.teacher);
-      this.cameras.restore(parked.scene.camera);
-    }
-    this.persist();
-    return true;
-  }
-
-  setFieldTripPoi(name: string): void {
-    this.state.set({ fieldTripPoi: name });
   }
 
   /* ---------------- voice input + doubt branching ---------------- */
@@ -917,10 +655,6 @@ export class ClassroomEngine {
     this.state.set({ listening: false });
   }
 
-  /**
-   * Provider STT fallback (Deepgram / AssemblyAI / Groq / OpenAI) via the
-   * existing transcribeFn. Never fabricates a transcript.
-   */
   private async startProviderSttFallback(): Promise<void> {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       this.state.set({
@@ -999,17 +733,15 @@ export class ClassroomEngine {
   }
 
   /**
-   * Student doubt (Sections 19–22): pause the master timeline, send the
-   * student's EXACT question + full lesson context to the AI Router, then
-   * splice a real answer branch in and resume. If the AI/network is
-   * unavailable the local deterministic answer is used as an honest fallback;
-   * no fake generic phrase is shown as if it were the AI answer.
+   * Student doubt: pause the master timeline, send the student's EXACT question
+   * + full lesson context to the AI Router, then splice a real answer branch in
+   * and resume. The local deterministic answer is an honest fallback only.
    */
   async askDoubt(question: string): Promise<void> {
     if (!this.plan) return;
     const q = question.trim();
     if (!q) return;
-    // Bug 6: pause the master timeline IMMEDIATELY, before any await.
+    // pause the master timeline IMMEDIATELY, before any await
     this.pause();
     this.state.bus.emit("question", { text: q });
     this.lastStudentQuestion = q;
@@ -1050,7 +782,6 @@ export class ClassroomEngine {
       const { currentToken } = await import("../ustad-client");
       const { runWithRecovery, requestId } = await import("./recovery");
       const rid = requestId([this.sessionId, this.lessonId, ctx.phaseIndex, q]);
-      // Bug #14: pass the signed session token; never an empty string.
       const sessionToken = await currentToken();
       const res = await runWithRecovery(
         rid,
@@ -1058,14 +789,12 @@ export class ClassroomEngine {
         () => answerDoubtFn({ data: { token: sessionToken, question: q, context: ctx } }),
         2,
       );
-      // Stale-response protection (Section 47): ignore an answer that returned
-      // after the lesson changed, a newer doubt started, or disposal.
+      // Stale-response protection: ignore an answer that returned after the
+      // lesson changed, a newer doubt started, or disposal.
       if (token !== this.doubtToken || this.disposed) {
         this.doubtInFlight = null;
         return;
       }
-      // Bug 9: NEVER replace a real AI answer with a canned visual branch.
-      // Visual doubts get the AI answer plus optional 3D enhancement.
       answerSteps = buildDoubtStepsFromAnswer(
         q,
         (res as { answer: string }).answer,
@@ -1074,10 +803,9 @@ export class ClassroomEngine {
         visual,
       );
     } catch (e) {
-      // Honest fallback (Bug 41): local deterministic answer, NEVER presented as AI.
+      // Honest fallback: local deterministic answer, NEVER presented as AI.
       source = "fallback";
       answerSteps = buildDoubtAnswer(q, this.plan.topic, this.lang ?? undefined);
-      // Bug 41: never present the local branch as a normal AI answer.
       if (answerSteps[0]?.say) {
         answerSteps[0] = {
           ...answerSteps[0],
@@ -1099,14 +827,13 @@ export class ClassroomEngine {
     this.state.set({
       playing: true,
       doubt: true,
-      answerMode: visual ? "3d" : "board",
+      answerMode: visual ? "diagram" : "board",
       doubtSource: source,
       camera: "teaching",
     });
     this.persist();
   }
 
-  /** Classroom speech follows the user's auto_speak preference (Bug 38). */
   setAutoSpeak(on: boolean): void {
     this.audio.setAutoSpeak(on);
   }
@@ -1119,28 +846,6 @@ export class ClassroomEngine {
     this.audio.speak(mathify(text));
   }
 
-  async enterXR(): Promise<boolean> {
-    return this.xr.enter();
-  }
-
-  private handlePick(obj: THREE.Object3D | null, point: THREE.Vector3 | null): void {
-    if (!obj) {
-      this.lighting.highlightAt(null);
-      return;
-    }
-    this.lighting.highlightAt(point);
-    if (obj === this.board.mesh || obj === this.teacher.group) {
-      // TEACHING LOCK: picking highlights and plays feedback, it never moves the
-      // camera. (Free-camera mode keeps the old focus-on-pick behaviour.)
-      if (!this.cameras.isTeachingLocked()) this.cameras.focusOn(point);
-      this.state.set({ camera: "teaching" });
-      if (obj === this.teacher.group) this.audio.sfx("pop");
-    } else {
-      this.audio.sfx("chime");
-      this.teacher.lookAt(point);
-    }
-  }
-
   /* ---------------- frame loop ---------------- */
 
   private loop = (): void => {
@@ -1149,25 +854,15 @@ export class ClassroomEngine {
     this.clock += dt;
 
     this.timeline.update(dt);
-    this.teacher.update(dt, (delta) => this.physics.moveCharacter(delta));
     this.board.update(dt);
-    this.objects.update(dt, this.clock);
-    this.lighting.setDaylight((Math.sin(this.clock * 0.02) + 1) / 2);
-    this.physics.step(dt);
-    this.cameras.update(dt);
-    this.render.render(this.cameras.camera);
+    this.teacher.update(dt, this.stage.frameAspect);
 
-    /**
-     * PERF (root cause of the mobile INP collapse): the HUD readouts used to be
-     * pushed during alternating 0.5s windows — EVERY frame inside those windows
-     * — so React re-rendered the whole page up to 60×/s for half of every
-     * second. HUD state now emits at most 2×/s, only when the bucket changes.
-     * The animation loop itself stays at full rAF speed.
-     */
+    // HUD state emits at most 2×/s — the loop must never setState per frame.
     const bucket = Math.floor(this.clock * 2);
     if (bucket !== this.hudBucket) {
       this.hudBucket = bucket;
       const c = this.timeline.chrono;
+      const max = Math.max(1, this.board.contentHeight - this.board.surface.height);
       this.state.set({
         fps: this.perf.fps,
         elapsedMs: Math.round(c.elapsed),
@@ -1176,18 +871,18 @@ export class ClassroomEngine {
         progress: c.progress,
         elapsedLabel: formatClock(c.elapsed),
         remainingLabel: formatClock(c.remaining),
+        boardScroll: Math.min(1, this.board.scroll / max),
       });
     }
     this.raf = requestAnimationFrame(this.loop);
   };
 
   dispose(): void {
-    if (this.disposed) return; // idempotent — safe against double disposal
+    if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.ro?.disconnect();
     this.ro = null;
-    this.interaction?.dispose();
     this.audio.dispose();
     this.voice.dispose();
     try {
@@ -1198,14 +893,10 @@ export class ClassroomEngine {
     this.mediaStream?.getTracks().forEach((t) => t.stop());
     this.mediaRecorder = null;
     this.mediaStream = null;
-    this.assets.dispose();
-    this.materials?.dispose();
-    this.objects?.clear();
+    this.visuals.clear();
     this.board?.dispose();
     this.teacher?.dispose();
-    this.lighting?.dispose();
-    this.physics.dispose();
-    this.render?.dispose();
+    this.stage.dispose();
     this.state.bus.clear();
   }
 }
