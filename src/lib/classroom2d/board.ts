@@ -570,7 +570,7 @@ export class BoardEngine {
     const { width, height } = this.surface;
     // content px → VIEWPORT px (the scrolled window is what physically exists
     // on the board surface), so the teacher's hand tracks what is visible.
-    const vy = THREE.MathUtils.clamp(y - this.scrollY, 0, H);
+    const vy = clamp(y - this.scrollY, 0, H);
     return out.set(
       this.mesh.position.x + (x / W - 0.5) * width,
       this.mesh.position.y + (0.5 - vy / H) * height,
@@ -743,7 +743,7 @@ export class BoardEngine {
   /** Scroll the viewport so `y` (content px) is comfortably visible. */
   scrollTo(y: number, immediate = false): void {
     const max = Math.max(0, this.contentHeight - H);
-    this.scrollTargetY = THREE.MathUtils.clamp(y, 0, max);
+    this.scrollTargetY = clamp(y, 0, max);
     if (immediate) this.scrollY = this.scrollTargetY;
     this.dirty = true;
   }
@@ -1108,8 +1108,8 @@ export class BoardEngine {
         for (const i of targets) {
           const w = i.w * i.scale;
           const h = i.h * i.scale;
-          i.x = THREE.MathUtils.clamp(i.x + op.dx, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y + op.dy, 0, Math.max(0, this.bandY + H - h));
+          i.x = clamp(i.x + op.dx, 0, Math.max(0, W - w));
+          i.y = clamp(i.y + op.dy, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
@@ -1121,13 +1121,13 @@ export class BoardEngine {
         if (!Number.isFinite(s) || s <= 0) break;
         for (const i of this.items) {
           const floor = i.size ? Math.max(0.3, this.minSize / i.size) : 0.3;
-          const next = THREE.MathUtils.clamp(i.scale * s, floor, 3);
+          const next = clamp(i.scale * s, floor, 3);
           if (next === i.scale) continue;
           i.scale = next;
           const w = i.w * next;
           const h = i.h * next;
-          i.x = THREE.MathUtils.clamp(i.x, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y, 0, Math.max(0, this.bandY + H - h));
+          i.x = clamp(i.x, 0, Math.max(0, W - w));
+          i.y = clamp(i.y, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
