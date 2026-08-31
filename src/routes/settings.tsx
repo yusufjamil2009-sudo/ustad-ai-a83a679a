@@ -102,8 +102,9 @@ function SettingsPage() {
           <TabsContent value="profile" className="mt-4">
             <ProfilePanel initial={(session?.profile ?? null) as Record<string, unknown> | null} />
           </TabsContent>
-          <TabsContent value="prefs" className="mt-4">
+          <TabsContent value="prefs" className="mt-4 space-y-4">
             <PrefsPanel />
+            <PwaInstallCard />
           </TabsContent>
           <TabsContent value="data" className="mt-4">
             <DataPanel token={token} guestId={session?.guestId ?? ""} />
