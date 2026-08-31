@@ -1821,7 +1821,7 @@ function drawDiagram(
     case "heart": {
       // two-lobe heart outline with chamber divider and flow arrows
       c.lineWidth = 6;
-      c.strokeStyle = ink(INK.warn);
+      c.strokeStyle = ink(INK.accent);
       c.beginPath();
       c.moveTo(200, 380 * reveal + 40);
       c.bezierCurveTo(20, 240, 40, 60, 130, 60);
@@ -2086,7 +2086,7 @@ function drawDiagram(
         c.fill();
       };
       arrow(340, 205, 500, 205, ink(INK.good), 0.35);
-      arrow(200, 205, 60, 205, ink(INK.warn), 0.55);
+      arrow(200, 205, 60, 205, ink(INK.accent), 0.55);
       arrow(270, 150, 270, 30, ink(INK.cool), 0.72);
       arrow(270, 260, 270, 370, ink(INK.hl), 0.88);
       label(labels[0] ?? "Applied force", 380, 180, 0.45);
