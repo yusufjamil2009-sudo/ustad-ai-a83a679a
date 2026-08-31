@@ -56,20 +56,112 @@ const lineH = (size: number): number => size * LINE_H;
  */
 const PAINT_INTERVAL = 1 / 30;
 
-/**
- * Physical writing surface. Sized and hung at a real teaching height so the
- * teacher's standing shoulder + extended arm can actually reach the TOP row of
- * the board (old board was 4.22 m tall hung at y=2.4 → its upper half was
- * physically unreachable, which is why the hand never met the writing).
- */
-const SURFACE_W = 6.9;
-const SURFACE_H = (SURFACE_W * BOARD_H) / BOARD_W;
-const SURFACE_Y = 1.75;
-const SURFACE_Z = -6.18;
-
-
 /** Fonts: Devanagari-capable stack so Hindi/Hinglish renders as real glyphs. */
 const FONT_STACK = '"Noto Sans Devanagari", Sora, "Segoe UI", sans-serif';
+
+/* ------------------------------------------------------------------ *
+ * BOARD THEMES. The board is a real 2D teaching surface now, so its
+ * look is a first-class setting: green chalkboard, deep blackboard, or
+ * a marker whiteboard. Every ink colour used by the writing/diagram
+ * engine is a TOKEN that is resolved per theme at paint time, so a
+ * theme switch never has to rewrite or re-layout existing content.
+ * ------------------------------------------------------------------ */
+export type BoardTheme = "chalkboard" | "whiteboard" | "blackboard";
+export const BOARD_THEMES: BoardTheme[] = ["chalkboard", "blackboard", "whiteboard"];
+
+type Palette = {
+  bg0: string;
+  bg1: string;
+  frame: string;
+  watermark: string;
+  ink: string;
+  ink2: string;
+  warm: string;
+  cool: string;
+  hl: string;
+  accent: string;
+  good: string;
+  hlFill: string;
+};
+
+const PALETTES: Record<BoardTheme, Palette> = {
+  chalkboard: {
+    bg0: "#0f2b28",
+    bg1: "#0a1f1d",
+    frame: "rgba(255,255,255,0.06)",
+    watermark: "rgba(244,247,255,0.3)",
+    ink: "#f4f7ff",
+    ink2: "#dbe6ff",
+    warm: "#ffe6b0",
+    cool: "#7fe3d4",
+    hl: "#ffd489",
+    accent: "#ff9f7a",
+    good: "#6fd08c",
+    hlFill: "rgba(255, 212, 137, 0.2)",
+  },
+  blackboard: {
+    bg0: "#16181c",
+    bg1: "#0a0b0d",
+    frame: "rgba(255,255,255,0.07)",
+    watermark: "rgba(255,255,255,0.24)",
+    ink: "#ffffff",
+    ink2: "#d7dbe2",
+    warm: "#ffe08a",
+    cool: "#8fd8ff",
+    hl: "#ffd166",
+    accent: "#ff8a7a",
+    good: "#7ee08c",
+    hlFill: "rgba(255, 209, 102, 0.2)",
+  },
+  whiteboard: {
+    bg0: "#fdfdfb",
+    bg1: "#eef1f6",
+    frame: "rgba(15,23,42,0.10)",
+    watermark: "rgba(15,23,42,0.20)",
+    ink: "#111827",
+    ink2: "#334155",
+    warm: "#b45309",
+    cool: "#0f766e",
+    hl: "#b45309",
+    accent: "#be123c",
+    good: "#15803d",
+    hlFill: "rgba(180, 83, 9, 0.16)",
+  },
+};
+
+/**
+ * Stable ink TOKENS. Items persist these values in snapshots, so they must
+ * never change; the palette below maps them to the active theme.
+ */
+const INK = {
+  ink: "#f4f7ff",
+  ink2: "#dbe6ff",
+  warm: "#ffe6b0",
+  cool: "#7fe3d4",
+  hl: "#ffd489",
+  accent: "#ff9f7a",
+  good: "#6fd08c",
+} as const;
+
+const TOKEN_OF: Record<string, keyof Palette> = {
+  [INK.ink]: "ink",
+  [INK.ink2]: "ink2",
+  [INK.warm]: "warm",
+  [INK.cool]: "cool",
+  [INK.hl]: "hl",
+  [INK.accent]: "accent",
+  [INK.good]: "good",
+};
+
+/** Active palette — set by BoardEngine.paint() before anything is drawn. */
+let PAL: Palette = PALETTES.chalkboard;
+
+/** Resolve a stored ink token to the active theme's colour. */
+function ink(color: string): string {
+  const key = TOKEN_OF[color];
+  return key ? (PAL[key] as string) : color;
+}
+
 
 export type BoardRole =
   "title" | "concept" | "formula" | "diagram" | "example" | "summary" | "mark";
