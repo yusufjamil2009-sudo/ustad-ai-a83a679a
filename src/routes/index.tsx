@@ -489,6 +489,15 @@ function ChatPage() {
             </p>
           </div>
 
+          {online ? null : (
+            <div
+              role="status"
+              className="border-b border-border bg-card/70 px-3 py-2 text-center text-xs text-muted-foreground md:px-8"
+            >
+              You are offline — saved pages still open, but AI replies need a connection.
+            </div>
+          )}
+
           <div className="hide-scrollbar flex-1 space-y-4 overflow-y-auto px-3 py-6 md:px-8">
             {messages.length === 0 ? (
               <div className="mx-auto max-w-xl py-14 text-center">
