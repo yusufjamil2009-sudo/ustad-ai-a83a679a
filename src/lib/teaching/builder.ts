@@ -17,8 +17,8 @@ import {
   type BoardOp,
   type LessonPlan,
   type LessonStep,
-} from "../classroom3d/types";
-import type { LessonLang } from "../classroom3d/lesson";
+} from "../classroom2d/types";
+import type { LessonLang } from "../classroom2d/lesson";
 import { chunkProse, type TeachingBlock, type TeachingContent } from "./normalize";
 
 const DEVANAGARI = /[\u0900-\u097F]/;

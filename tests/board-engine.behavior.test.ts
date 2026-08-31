@@ -99,7 +99,7 @@ function withFakeDocument<T>(fn: () => T): T {
 }
 
 async function loadBoard() {
-  return import("../src/lib/classroom3d/board.ts");
+  return import("../src/lib/classroom2d/board.ts");
 }
 
 const settle = async (
@@ -388,7 +388,7 @@ test("§10: chemical subscripts convert formulas, never ordinary words", async (
 
 test("§9: symbolize preserves math structure and cleans text/mathrm", async () => {
   const { symbolize } = await loadBoard();
-  const { needsMathLayout } = (await import("../src/lib/classroom3d/mathtype.ts")) as {
+  const { needsMathLayout } = (await import("../src/lib/classroom2d/mathtype.ts")) as {
     needsMathLayout: (s: string) => boolean;
   };
   const out = symbolize("\\frac{a}{b} + \\sqrt{x} + \\text{speed} + \\alpha \\rightarrow \\beta");
@@ -513,7 +513,7 @@ test("§23: resize respects the readability floor and keeps bounds in sync", asy
     b.apply({ op: "resize", scale: NaN }); // hostile input — ignored
     b.apply({ op: "resize", scale: -3 }); // hostile input — ignored
     const item = b.snapshot().items[0]!;
-    const boardSrc = readFileSync(join(ROOT, "src/lib/classroom3d/board.ts"), "utf8");
+    const boardSrc = readFileSync(join(ROOT, "src/lib/classroom2d/board.ts"), "utf8");
     assert.match(boardSrc, /const floor = this\.minSize/, "one authoritative floor");
     assert.ok(
       (item.size ?? 60) * item.scale >= 45.9, // 46 = readability floor
@@ -576,7 +576,7 @@ test("§47/§48: erase removes the last item; clear releases the timeline gate",
 /* ---------------- §37 DPR resize race (render engine contract) ---------------- */
 
 test("§37: renderer.setQuality with a DPR change resizes buffer + post once", async () => {
-  const src = readFileSync(join(ROOT, "src/lib/classroom3d/renderer.ts"), "utf8");
+  const src = readFileSync(join(ROOT, "src/lib/classroom2d/renderer.ts"), "utf8");
   const setQuality = src.slice(src.indexOf("setQuality(q"), src.indexOf("/** Re-evaluate"));
   assert.match(setQuality, /getPixelRatio\(\) !== dpr/, "DPR change guarded");
   assert.match(

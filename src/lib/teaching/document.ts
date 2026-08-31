@@ -8,7 +8,7 @@
 import { extractChapterFromBookText, listChapterHeadings } from "../book-knowledge/chapter-text";
 import { extractChapterStructure } from "../book-knowledge/extract";
 import type { TeachingContent } from "./normalize";
-import type { LessonLang } from "../classroom3d/lesson";
+import type { LessonLang } from "../classroom2d/lesson";
 import { shouldRecommendFieldTrip } from "./field-trip";
 import { ingestSourceText, type SourceDocument } from "./source";
 

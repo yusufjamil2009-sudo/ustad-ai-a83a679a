@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 
 test("board readability: the minimum is ONE value (no contradictory 46 vs 28/30)", async () => {
   const src = await import("node:fs").then((fs) =>
-    fs.readFileSync("src/lib/classroom3d/board.ts", "utf8"),
+    fs.readFileSync("src/lib/classroom2d/board.ts", "utf8"),
   );
   // Layout floor must reference the engine minSize, not a hardcoded 28/30.
   assert.ok(
@@ -27,7 +27,7 @@ test("board readability: the minimum is ONE value (no contradictory 46 vs 28/30)
 
 test("board snapshot is versioned and restorable", async () => {
   const src = await import("node:fs").then((fs) =>
-    fs.readFileSync("src/lib/classroom3d/board.ts", "utf8"),
+    fs.readFileSync("src/lib/classroom2d/board.ts", "utf8"),
   );
   assert.ok(/export type BoardSnapshot/.test(src), "BoardSnapshot type must be exported");
   assert.ok(/snapshot\(\): BoardSnapshot/.test(src), "snapshot() must return BoardSnapshot");
@@ -37,7 +37,7 @@ test("board snapshot is versioned and restorable", async () => {
 
 test("board add() never falls back to an unsafe overlapping coordinate", async () => {
   const src = await import("node:fs").then((fs) =>
-    fs.readFileSync("src/lib/classroom3d/board.ts", "utf8"),
+    fs.readFileSync("src/lib/classroom2d/board.ts", "utf8"),
   );
   // The old unsafe line was: x: spot?.x ?? partial.x
   assert.ok(

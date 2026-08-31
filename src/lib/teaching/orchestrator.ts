@@ -9,10 +9,10 @@
  *
  * ClassroomEngine remains the runtime that talks to Three.js.
  */
-import { EventBus } from "../classroom3d/events";
-import { buildLessonPlan, type LessonLang, type StudyLessonContent } from "../classroom3d/lesson";
-import type { ClassroomEngine } from "../classroom3d/engine";
-import type { LessonPlan, LessonStep } from "../classroom3d/types";
+import { EventBus } from "../classroom2d/events";
+import { buildLessonPlan, type LessonLang, type StudyLessonContent } from "../classroom2d/lesson";
+import type { ClassroomEngine } from "../classroom2d/engine";
+import type { LessonPlan, LessonStep } from "../classroom2d/types";
 import { fromStudyLessonContent, type TeachingContent } from "./normalize";
 import { buildTeachingPlan } from "./builder";
 import {
@@ -32,12 +32,6 @@ import {
   type LessonSourceType,
   type SourceDocument,
 } from "./source";
-import {
-  buildFieldTripPlan,
-  fieldTripStatusFromVisual,
-  selectFieldTrip,
-  wantsFieldTrip,
-} from "./field-trip";
 import { adaptiveSay, classifyTeachingSignal, shouldAdapt, type TeachingSignal } from "./signals";
 
 export type StartTeachingInput = {
@@ -49,7 +43,6 @@ export type StartTeachingInput = {
   source?: LessonSourceRef;
   sourceDocument?: SourceDocument;
   autoplay?: boolean;
-  fieldTrip?: boolean;
 };
 
 export type QuizHandoff = {
@@ -195,10 +188,6 @@ export class TeachingOrchestrator {
     this.lastErrorKind = null;
     // A new lesson always resets the high-level machine (timeline is reloaded).
     this.lifecycle = "idle";
-
-    if (input.fieldTrip || wantsFieldTrip(input.topic)) {
-      return this.startFieldTrip(input.topic, input.language, input.autoplay);
-    }
 
     this.mode = "classroom";
     this.setLifecycle("understanding_request");
@@ -352,81 +341,6 @@ export class TeachingOrchestrator {
     this.bus.emit("mode", { mode });
   }
 
-  /**
-   * Virtual Field Trip on the EXISTING 3D classroom engine.
-   * Parks the current lesson (if any) so exitFieldTrip can restore it.
-   */
-  startFieldTrip(topic: string, language?: LessonLang, autoplay?: boolean): LessonPlan {
-    const lang = language ?? this.lastLang;
-    this.lastTopic = topic;
-    this.lastLang = lang;
-    this.lastError = null;
-    this.lifecycle = "idle";
-    this.setLifecycle("understanding_request");
-    this.setLifecycle("planning_lesson");
-    const scene = selectFieldTrip(topic);
-    const plan = buildFieldTripPlan(scene, lang);
-    this.setLifecycle("building_timeline");
-    this.bus.emit("planned", { plan });
-    this.mode = "virtual_field_trip";
-    if (!scene.available3d) {
-      this.reportError("diagram", scene.reason, false);
-    }
-    const engine = this.engine;
-    if (engine) {
-      this.setLifecycle("preparing_classroom");
-      engine.setLanguage(lang);
-      engine.enterFieldTrip(plan, {
-        id: scene.id,
-        available3d: scene.available3d,
-        reason: scene.reason,
-        firstPoi: scene.pois[0]?.name ?? scene.title,
-        visualMode: scene.visual.mode,
-        status: fieldTripStatusFromVisual(scene.visual.mode),
-      });
-      if (autoplay !== false) {
-        engine.play();
-        this.setLifecycle("teaching");
-      } else {
-        this.setLifecycle("paused");
-      }
-    } else {
-      this.setLifecycle("preparing_classroom");
-      this.setLifecycle(autoplay === false ? "paused" : "teaching");
-    }
-    this.pushState();
-    return plan;
-  }
-
-  /** Return to the parked classroom lesson (or stay completed if none). */
-  exitFieldTrip(): boolean {
-    this.mode = "classroom";
-    const restored = this.engine?.exitFieldTrip() ?? false;
-    this.bus.emit("mode", { mode: "classroom" });
-    if (restored) {
-      this.setLifecycle("paused");
-      return true;
-    }
-    this.setLifecycle("completed");
-    return false;
-  }
-
-  nextFieldTripPoi(): boolean {
-    const engine = this.engine;
-    if (!engine) return false;
-    const plan = engine.getPlan();
-    if (!plan) return false;
-    const idx = engine.state.get().stepIndex;
-    const next = plan.steps.findIndex((step, i) => i > idx && step.phase === "diagram");
-    if (next < 0) return false;
-    engine.seekStep(next);
-    return true;
-  }
-
-  enterFieldTrip(topic: string, language?: LessonLang, autoplay?: boolean): LessonPlan {
-    return this.startFieldTrip(topic, language, autoplay);
-  }
-
   can(action: OrchestratorAction): boolean {
     const life = this.lifecycle;
     if (action === "start") return life !== "doubt_branch";
@@ -543,10 +457,6 @@ export class TeachingOrchestrator {
     if (!engine) return;
     const phase = engine.state.get().phase;
     this.applyCamera(cameraRequestForPhase(phase));
-    if (engine.state.get().teachingMode === "virtual_field_trip" && phase === "diagram") {
-      const label = engine.state.get().caption;
-      if (label) engine.setFieldTripPoi(label);
-    }
     const label = engine.state.get().caption;
     if (label && (phase === "concept" || phase === "formula" || phase === "example")) {
       const prev = engine.state.get().completedConcepts;

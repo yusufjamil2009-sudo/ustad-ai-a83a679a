@@ -31,10 +31,10 @@ import { Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ClassroomEngine } from "@/lib/classroom3d/engine";
-import type { ClassroomState } from "@/lib/classroom3d/state";
-import type { QualityTier } from "@/lib/classroom3d/types";
-import type { LessonLang } from "@/lib/classroom3d/lesson";
+import type { ClassroomEngine } from "@/lib/classroom2d/engine";
+import type { ClassroomState } from "@/lib/classroom2d/state";
+import type { QualityTier } from "@/lib/classroom2d/types";
+import type { LessonLang } from "@/lib/classroom2d/lesson";
 import { useSettings } from "@/lib/settings-store";
 import { TeachingOrchestrator } from "@/lib/teaching/orchestrator";
 import { generateNotesFn } from "@/lib/ustad-api";
@@ -88,7 +88,7 @@ function ClassroomPage() {
 
     (async () => {
       const [{ ClassroomEngine: Engine }, { takeClassroomHandoff }] = await Promise.all([
-        import("@/lib/classroom3d/engine"),
+        import("@/lib/classroom2d/engine"),
         import("@/lib/classroom-handoff"),
       ]);
       const canvas = canvasRef.current;

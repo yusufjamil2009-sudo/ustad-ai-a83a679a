@@ -1,9 +1,9 @@
-/** Scene / state engine — single source of truth for teacher, camera, board, objects, audio. */
+/** Scene / state engine — single source of truth for teacher, board, timeline and audio (2D classroom). */
 import { EventBus } from "./events";
 import type { CameraId, LessonPlan, TeacherAnimation } from "./types";
+import type { BoardTheme } from "./board";
 import type { StudentLevel, TeachingLifecycle, TeachingMode } from "../teaching/lifecycle";
 import type { LessonSourceType } from "../teaching/source";
-import type { FieldTripSceneStatus, VisualAvailability } from "../teaching/field-trip";
 
 export type ClassroomState = {
   ready: boolean;
@@ -22,7 +22,6 @@ export type ClassroomState = {
   quality: "low" | "medium" | "high";
   muted: boolean;
   listening: boolean;
-  xrSupported: boolean;
   error: string | null;
   /** chrono engine readouts */
   elapsedMs: number;
@@ -34,7 +33,7 @@ export type ClassroomState = {
   /** true while a student-doubt branch is playing */
   doubt: boolean;
   /** how the current doubt is being answered */
-  answerMode: "none" | "board" | "3d";
+  answerMode: "none" | "board" | "diagram";
   /**
    * Provenance of the current doubt answer (Bug 41). "fallback" is the local
    * deterministic branch used ONLY when live AI is unavailable — it must never
@@ -45,12 +44,10 @@ export type ClassroomState = {
   transcript: string;
   voiceSupported: boolean;
   portrait: boolean;
-  postFx: boolean;
   /** forced aspect-ratio framing family */
   ratio: "auto" | "16:9" | "9:16";
   /** true while the teacher's hand is writing strokes on the board */
   writing: boolean;
-  freeCamera: boolean;
   /** active teaching language */
   lang: "english" | "hindi" | "hinglish";
   /**
@@ -66,11 +63,10 @@ export type ClassroomState = {
   completedConcepts: string[];
   sourceType: LessonSourceType | null;
   studentLevel: StudentLevel | null;
-  /** Virtual field trip (Part 2) — same 3D engine, different teaching mode. */
-  fieldTripId: string | null;
-  fieldTripPoi: string;
-  fieldTripStatus: FieldTripSceneStatus | null;
-  fieldTripVisual: VisualAvailability | null;
+  /** 2D board surface theme. */
+  boardTheme: BoardTheme;
+  /** live board scroll position (0..1 of scrollable content) */
+  boardScroll: number;
 };
 
 export type ClassroomEvents = {
@@ -100,7 +96,6 @@ export class StateEngine {
     quality: "high",
     muted: false,
     listening: false,
-    xrSupported: false,
     error: null,
     elapsedMs: 0,
     remainingMs: 0,
@@ -114,10 +109,8 @@ export class StateEngine {
     transcript: "",
     voiceSupported: false,
     portrait: false,
-    postFx: true,
     ratio: "auto",
     writing: false,
-    freeCamera: false,
     lang: "english",
     needsResume: false,
     voiceError: null,
@@ -126,10 +119,8 @@ export class StateEngine {
     completedConcepts: [],
     sourceType: null,
     studentLevel: null,
-    fieldTripId: null,
-    fieldTripPoi: "",
-    fieldTripStatus: null,
-    fieldTripVisual: null,
+    boardTheme: "chalkboard",
+    boardScroll: 0,
   };
 
   get(): ClassroomState {

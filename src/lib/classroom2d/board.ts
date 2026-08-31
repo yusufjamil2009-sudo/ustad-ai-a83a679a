@@ -11,7 +11,7 @@
  * oldest non-title content instead of overwriting it. Board state is fully
  * described by the item list, so it is recoverable from timeline state.
  */
-import * as THREE from "three";
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 import {
   clusterStarts,
   drawMath,
@@ -56,20 +56,112 @@ const lineH = (size: number): number => size * LINE_H;
  */
 const PAINT_INTERVAL = 1 / 30;
 
-/**
- * Physical writing surface. Sized and hung at a real teaching height so the
- * teacher's standing shoulder + extended arm can actually reach the TOP row of
- * the board (old board was 4.22 m tall hung at y=2.4 → its upper half was
- * physically unreachable, which is why the hand never met the writing).
- */
-const SURFACE_W = 6.9;
-const SURFACE_H = (SURFACE_W * BOARD_H) / BOARD_W;
-const SURFACE_Y = 1.75;
-const SURFACE_Z = -6.18;
-
-
 /** Fonts: Devanagari-capable stack so Hindi/Hinglish renders as real glyphs. */
 const FONT_STACK = '"Noto Sans Devanagari", Sora, "Segoe UI", sans-serif';
+
+/* ------------------------------------------------------------------ *
+ * BOARD THEMES. The board is a real 2D teaching surface now, so its
+ * look is a first-class setting: green chalkboard, deep blackboard, or
+ * a marker whiteboard. Every ink colour used by the writing/diagram
+ * engine is a TOKEN that is resolved per theme at paint time, so a
+ * theme switch never has to rewrite or re-layout existing content.
+ * ------------------------------------------------------------------ */
+export type BoardTheme = "chalkboard" | "whiteboard" | "blackboard";
+export const BOARD_THEMES: BoardTheme[] = ["chalkboard", "blackboard", "whiteboard"];
+
+type Palette = {
+  bg0: string;
+  bg1: string;
+  frame: string;
+  watermark: string;
+  ink: string;
+  ink2: string;
+  warm: string;
+  cool: string;
+  hl: string;
+  accent: string;
+  good: string;
+  hlFill: string;
+};
+
+const PALETTES: Record<BoardTheme, Palette> = {
+  chalkboard: {
+    bg0: "#0f2b28",
+    bg1: "#0a1f1d",
+    frame: "rgba(255,255,255,0.06)",
+    watermark: "rgba(244,247,255,0.3)",
+    ink: "#f4f7ff",
+    ink2: "#dbe6ff",
+    warm: "#ffe6b0",
+    cool: "#7fe3d4",
+    hl: "#ffd489",
+    accent: "#ff9f7a",
+    good: "#6fd08c",
+    hlFill: "rgba(255, 212, 137, 0.2)",
+  },
+  blackboard: {
+    bg0: "#16181c",
+    bg1: "#0a0b0d",
+    frame: "rgba(255,255,255,0.07)",
+    watermark: "rgba(255,255,255,0.24)",
+    ink: "#ffffff",
+    ink2: "#d7dbe2",
+    warm: "#ffe08a",
+    cool: "#8fd8ff",
+    hl: "#ffd166",
+    accent: "#ff8a7a",
+    good: "#7ee08c",
+    hlFill: "rgba(255, 209, 102, 0.2)",
+  },
+  whiteboard: {
+    bg0: "#fdfdfb",
+    bg1: "#eef1f6",
+    frame: "rgba(15,23,42,0.10)",
+    watermark: "rgba(15,23,42,0.20)",
+    ink: "#111827",
+    ink2: "#334155",
+    warm: "#b45309",
+    cool: "#0f766e",
+    hl: "#b45309",
+    accent: "#be123c",
+    good: "#15803d",
+    hlFill: "rgba(180, 83, 9, 0.16)",
+  },
+};
+
+/**
+ * Stable ink TOKENS. Items persist these values in snapshots, so they must
+ * never change; the palette below maps them to the active theme.
+ */
+const INK = {
+  ink: "#f4f7ff",
+  ink2: "#dbe6ff",
+  warm: "#ffe6b0",
+  cool: "#7fe3d4",
+  hl: "#ffd489",
+  accent: "#ff9f7a",
+  good: "#6fd08c",
+} as const;
+
+const TOKEN_OF: Record<string, keyof Palette> = {
+  [INK.ink]: "ink",
+  [INK.ink2]: "ink2",
+  [INK.warm]: "warm",
+  [INK.cool]: "cool",
+  [INK.hl]: "hl",
+  [INK.accent]: "accent",
+  [INK.good]: "good",
+};
+
+/** Active palette — set by BoardEngine.paint() before anything is drawn. */
+let PAL: Palette = PALETTES.chalkboard;
+
+/** Resolve a stored ink token to the active theme's colour. */
+function ink(color: string): string {
+  const key = TOKEN_OF[color];
+  return key ? (PAL[key] as string) : color;
+}
+
 
 export type BoardRole =
   "title" | "concept" | "formula" | "diagram" | "example" | "summary" | "mark";
@@ -464,10 +556,10 @@ export function mathify(raw: string): string {
 }
 
 export class BoardEngine {
-  readonly mesh: THREE.Mesh;
-  private canvas: HTMLCanvasElement;
+  /** The live 2D writing surface. Mounted straight into the DOM by the stage. */
+  readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private texture: THREE.CanvasTexture;
+  private theme: BoardTheme = "chalkboard";
   private items: Item[] = [];
   private archived: Item[] = [];
   /** Top of the current writing band inside the persistent content space (px). */
@@ -495,32 +587,12 @@ export class BoardEngine {
   private minSize = 46;
   private sizeScale = 1;
 
-  constructor(maxAnisotropy = 8) {
+  constructor() {
     this.canvas = document.createElement("canvas");
     this.canvas.width = W;
     this.canvas.height = H;
+    this.canvas.className = "ustad-board-canvas";
     this.ctx = this.canvas.getContext("2d")!;
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    // Always max sharpness: the board texture never follows the quality tier.
-    this.texture.anisotropy = Math.max(8, maxAnisotropy);
-    this.texture.generateMipmaps = true;
-    this.texture.minFilter = THREE.LinearMipmapLinearFilter;
-    this.texture.magFilter = THREE.LinearFilter;
-
-    // The board is the focal teaching surface, hung at real human writing height.
-    const geo = new THREE.PlaneGeometry(SURFACE_W, SURFACE_H);
-    const mat = new THREE.MeshStandardMaterial({
-      map: this.texture,
-      roughness: 0.42,
-      metalness: 0.02,
-      emissive: new THREE.Color(0x0b1b18),
-      emissiveIntensity: 0.22,
-    });
-    this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.position.set(0, SURFACE_Y, SURFACE_Z);
-    this.mesh.receiveShadow = true;
-    this.mesh.name = "board";
     this.paint();
   }
 
@@ -544,20 +616,25 @@ export class BoardEngine {
     this.dirty = true;
   }
 
-  /**
-   * Quality hook. Decorative response only — the board keeps full-resolution text
-   * and simply brightens its own emissive so it stays crisp when scene lighting
-   * and post-processing are reduced.
-   */
-  setQuality(q: "low" | "medium" | "high"): void {
-    const mat = this.mesh.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = q === "low" ? 0.34 : q === "medium" ? 0.28 : 0.22;
-    mat.needsUpdate = true;
+  /** Board surface theme — chalkboard (green), blackboard, or whiteboard. */
+  setTheme(theme: BoardTheme): void {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.dirty = true;
   }
 
-  /** World size of the writing surface — used by camera framing and teacher IK. */
+  getTheme(): BoardTheme {
+    return this.theme;
+  }
+
+  /** Kept for API parity; 2D board readability never follows a quality tier. */
+  setQuality(_q: "low" | "medium" | "high"): void {
+    /* board text is always full resolution */
+  }
+
+  /** Pixel size of the writing surface (canvas space). */
   get surface(): { width: number; height: number } {
-    return { width: SURFACE_W, height: SURFACE_H };
+    return { width: W, height: H };
   }
 
   /** True while any element is still being written/drawn — gates the timeline. */
@@ -565,18 +642,15 @@ export class BoardEngine {
     return this.items.some((i) => i.reveal < 1);
   }
 
-  /** Canvas px → world point on the board (for hand IK / pen tracking). */
-  pointToWorld(x: number, y: number, out: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
-    const { width, height } = this.surface;
-    // content px → VIEWPORT px (the scrolled window is what physically exists
-    // on the board surface), so the teacher's hand tracks what is visible.
-    const vy = THREE.MathUtils.clamp(y - this.scrollY, 0, H);
-    return out.set(
-      this.mesh.position.x + (x / W - 0.5) * width,
-      this.mesh.position.y + (0.5 - vy / H) * height,
-      this.mesh.position.z + 0.08,
-    );
+  /**
+   * Content px → normalised VIEWPORT position (0..1, 0..1) of the live pen tip.
+   * The 2D teacher uses this to place its writing hand over the board.
+   */
+  pointToViewport(x: number, y: number): { u: number; v: number } {
+    const vy = clamp(y - this.scrollY, 0, H);
+    return { u: clamp(x / W, 0, 1), v: clamp(vy / H, 0, 1) };
   }
+
 
   /* ---------------- layout engine ---------------- */
 
@@ -743,7 +817,7 @@ export class BoardEngine {
   /** Scroll the viewport so `y` (content px) is comfortably visible. */
   scrollTo(y: number, immediate = false): void {
     const max = Math.max(0, this.contentHeight - H);
-    this.scrollTargetY = THREE.MathUtils.clamp(y, 0, max);
+    this.scrollTargetY = clamp(y, 0, max);
     if (immediate) this.scrollY = this.scrollTargetY;
     this.dirty = true;
   }
@@ -810,7 +884,7 @@ export class BoardEngine {
         mathAsc: box.asc + 8,
         text: src,
         size: ms,
-        color: "#ffe6b0",
+        color: INK.warm,
         language: "en",
         writeMs: Math.max(1200, writeDurationMs(src, ms)),
       },
@@ -906,7 +980,7 @@ export class BoardEngine {
         lines: fitted.lines,
         text,
         size: fitted.size,
-        color: role === "title" ? "#ffe6b0" : "#f4f7ff",
+        color: role === "title" ? INK.warm : INK.ink,
         language: detectLang(text),
         writeMs: writeDurationMs(text, fitted.size),
       });
@@ -1032,7 +1106,7 @@ export class BoardEngine {
           w: Math.max(...xs) - minX + 28,
           h: Math.max(...ys) - minY + 28,
           points: op.points,
-          color: "#7fe3d4",
+          color: INK.cool,
           language: "en",
           writeMs: 600 + op.points.length * 60,
         });
@@ -1056,7 +1130,7 @@ export class BoardEngine {
           role: "mark",
           w,
           h,
-          color: "#ffd489",
+          color: INK.hl,
           language: "en",
           writeMs: 900,
         });
@@ -1078,7 +1152,7 @@ export class BoardEngine {
           role: "diagram",
           w: Math.min(intrinsic.w, r.w - 20),
           h: Math.min(intrinsic.h, r.h - 20),
-          color: "#7fe3d4",
+          color: INK.cool,
           language: "en",
           diagram: { kind: op.kind, title: op.title, data: op.data, labels: op.labels },
           writeMs: 4200,
@@ -1108,8 +1182,8 @@ export class BoardEngine {
         for (const i of targets) {
           const w = i.w * i.scale;
           const h = i.h * i.scale;
-          i.x = THREE.MathUtils.clamp(i.x + op.dx, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y + op.dy, 0, Math.max(0, this.bandY + H - h));
+          i.x = clamp(i.x + op.dx, 0, Math.max(0, W - w));
+          i.y = clamp(i.y + op.dy, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
@@ -1121,13 +1195,13 @@ export class BoardEngine {
         if (!Number.isFinite(s) || s <= 0) break;
         for (const i of this.items) {
           const floor = i.size ? Math.max(0.3, this.minSize / i.size) : 0.3;
-          const next = THREE.MathUtils.clamp(i.scale * s, floor, 3);
+          const next = clamp(i.scale * s, floor, 3);
           if (next === i.scale) continue;
           i.scale = next;
           const w = i.w * next;
           const h = i.h * next;
-          i.x = THREE.MathUtils.clamp(i.x, 0, Math.max(0, W - w));
-          i.y = THREE.MathUtils.clamp(i.y, 0, Math.max(0, this.bandY + H - h));
+          i.x = clamp(i.x, 0, Math.max(0, W - w));
+          i.y = clamp(i.y, 0, Math.max(0, this.bandY + H - h));
         }
         break;
       }
@@ -1210,7 +1284,7 @@ export class BoardEngine {
         z: it.z,
         scale: it.scale,
         reveal: 1, // restored content is already fully written
-        color: it.color ?? "#f4f7ff",
+        color: it.color ?? INK.ink,
         language: it.text ? detectLang(it.text) : "en",
         writeMs: 0,
         ...(it.text ? { text: it.text } : {}),
@@ -1364,20 +1438,22 @@ export class BoardEngine {
 
   private paint(): void {
     const c = this.ctx;
+    PAL = PALETTES[this.theme];
     const grad = c.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#0f2b28");
-    grad.addColorStop(1, "#0a1f1d");
+    grad.addColorStop(0, PAL.bg0);
+    grad.addColorStop(1, PAL.bg1);
     c.fillStyle = grad;
     c.fillRect(0, 0, W, H);
-    c.strokeStyle = "rgba(255,255,255,0.06)";
+    c.strokeStyle = PAL.frame;
     c.lineWidth = 6;
     c.strokeRect(24, 24, W - 48, H - 48);
-    c.fillStyle = "rgba(244,247,255,0.3)";
+    c.fillStyle = PAL.watermark;
     c.font = `600 34px ${FONT_STACK}`;
     c.textAlign = "right";
     c.fillText("USTAD AI", W - 70, 90);
     c.textAlign = "left";
     c.textBaseline = "top";
+
 
     // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
     // has scrolled out stays in the item list (never deleted) and simply is not
@@ -1396,10 +1472,10 @@ export class BoardEngine {
         const total = i.lines.join("").length || 1;
         let shownChars = Math.ceil(total * i.reveal);
         if (i.highlight) {
-          c.fillStyle = "rgba(255, 212, 137, 0.2)";
+          c.fillStyle = PAL.hlFill;
           c.fillRect(-12, -8, i.w + 12, i.h);
         }
-        c.fillStyle = i.color;
+        c.fillStyle = ink(i.color);
         c.font = `600 ${size}px ${FONT_STACK}`;
         const clusterIdx = i.lines.map((l) => clusterStarts(l));
         const totalClusters = clusterIdx.reduce((a, s) => a + s.length, 0) || 1;
@@ -1414,7 +1490,7 @@ export class BoardEngine {
           if (boundary > 0) c.fillText(visible, 0, k * lh);
         });
         if (i.underline && i.reveal >= 1) {
-          c.strokeStyle = "#ffd489";
+          c.strokeStyle = ink(INK.hl);
           c.lineWidth = 6;
           const uw = this.measure(i.lines, size);
           c.beginPath();
@@ -1423,7 +1499,7 @@ export class BoardEngine {
           c.stroke();
         }
         if (i.circled && i.reveal >= 1) {
-          c.strokeStyle = "#ff9f7a";
+          c.strokeStyle = ink(INK.accent);
           c.lineWidth = 6;
           c.beginPath();
           c.ellipse(i.w / 2 - 6, i.h / 2, i.w / 2 + 20, i.h / 2 + 14, 0, 0, Math.PI * 2);
@@ -1449,7 +1525,7 @@ export class BoardEngine {
         );
         if (res.tip) i.tip = [i.x + res.tip[0] * i.scale, i.y + res.tip[1] * i.scale];
         if (i.underline && i.reveal >= 1) {
-          c.strokeStyle = "#ffd489";
+          c.strokeStyle = ink(INK.hl);
           c.lineWidth = 6;
           c.beginPath();
           c.moveTo(0, (i.mathAsc ?? 0) + 16);
@@ -1457,7 +1533,7 @@ export class BoardEngine {
           c.stroke();
         }
       } else if (i.kind === "path" && i.points?.length) {
-        c.strokeStyle = i.color;
+        c.strokeStyle = ink(i.color);
         c.lineWidth = 8;
         c.lineJoin = "round";
         c.lineCap = "round";
@@ -1473,8 +1549,8 @@ export class BoardEngine {
         const by = i.from?.[1] ?? 0;
         const ex = bx + (i.to[0] - bx) * i.reveal;
         const ey = by + (i.to[1] - by) * i.reveal;
-        c.strokeStyle = i.color;
-        c.fillStyle = i.color;
+        c.strokeStyle = ink(i.color);
+        c.fillStyle = ink(i.color);
         c.lineWidth = 8;
         c.beginPath();
         c.moveTo(bx, by);
@@ -1513,7 +1589,6 @@ export class BoardEngine {
       c.restore();
     }
     c.textBaseline = "alphabetic";
-    this.texture.needsUpdate = true;
   }
 
   dispose(): void {
@@ -1523,11 +1598,9 @@ export class BoardEngine {
     delete this.onWriteEnd;
     this.items = [];
     this.archived = [];
-    this.texture.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.geometry.dispose();
-    this.mesh.removeFromParent();
+    this.canvas.remove();
   }
+
 }
 
 /** Diagram engine — procedural educational diagrams drawn on the board canvas. */
@@ -1542,8 +1615,8 @@ function drawDiagram(
   reveal: number,
 ): void {
   c.save();
-  c.strokeStyle = "#7fe3d4";
-  c.fillStyle = "#7fe3d4";
+  c.strokeStyle = ink(INK.cool);
+  c.fillStyle = ink(INK.cool);
   c.lineWidth = 6;
   c.font = `600 38px ${FONT_STACK}`;
   if (d.title) c.fillText(d.title, 0, -30);
@@ -1552,7 +1625,7 @@ function drawDiagram(
     if (reveal < at) return;
     c.save();
     c.globalAlpha = Math.min(1, (reveal - at) / 0.12);
-    c.fillStyle = "#dbe6ff";
+    c.fillStyle = ink(INK.ink2);
     c.font = `500 30px ${FONT_STACK}`;
     c.fillText(text, x, y);
     c.restore();
@@ -1565,7 +1638,7 @@ function drawDiagram(
       const max = Math.max(...data);
       data.forEach((v, i) => {
         const h = (v / max) * 320 * reveal;
-        c.fillStyle = i % 2 ? "#ffd489" : "#7fe3d4";
+        c.fillStyle = i % 2 ? ink(INK.hl) : ink(INK.cool);
         c.fillRect(i * 110, 360 - h, 74, h);
         label(labels[i] ?? String(v), i * 110, 400, (i + 0.8) / data.length);
       });
@@ -1629,16 +1702,16 @@ function drawDiagram(
     }
     case "photosynthesis": {
       // sun -> leaf -> outputs
-      c.fillStyle = "#ffd489";
+      c.fillStyle = ink(INK.hl);
       c.beginPath();
       c.arc(60, 60, 44 * reveal, 0, Math.PI * 2);
       c.fill();
-      c.strokeStyle = "#ffd489";
+      c.strokeStyle = ink(INK.hl);
       c.beginPath();
       c.moveTo(100, 100);
       c.lineTo(210 * reveal, 190 * reveal);
       c.stroke();
-      c.fillStyle = "#6fd08c";
+      c.fillStyle = ink(INK.good);
       c.beginPath();
       c.ellipse(300, 230, 130 * reveal, 76 * reveal, -0.5, 0, Math.PI * 2);
       c.fill();

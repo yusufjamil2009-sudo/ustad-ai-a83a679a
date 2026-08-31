@@ -6,7 +6,7 @@ import { getAttachment, attachmentAsDataUrl } from "../data.server";
 import { requireGuest } from "../guest.server";
 import { usableProviders } from "../api-manager.server";
 import { ocrImage } from "../provider-clients.server";
-import type { LessonLang } from "../classroom3d/lesson";
+import type { LessonLang } from "../classroom2d/lesson";
 import {
   buildDocumentLessonFromText,
   pagesFromExtracted,

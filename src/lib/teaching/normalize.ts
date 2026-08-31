@@ -6,7 +6,7 @@
  * — is normalised into this shape before a semantic timeline is built. The
  * timeline engines downstream never care where the content came from.
  */
-import type { LessonPhase } from "../classroom3d/types";
+import type { LessonPhase } from "../classroom2d/types";
 
 export type TeachingBlock = {
   /** Semantic phase this block represents. */
