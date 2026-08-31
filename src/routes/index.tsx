@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useGuest } from "@/lib/ustad-client";
 import { useSettings } from "@/lib/settings-store";
 import { useGreeting } from "@/hooks/useGreeting";
+import { useOnline } from "@/hooks/usePwa";
 import { UstadLogo } from "@/components/UstadLogo";
 import { setClassroomHandoff } from "@/lib/classroom-handoff";
 import { wantsFieldTrip } from "@/lib/teaching/field-trip";
@@ -157,6 +158,7 @@ function ChatPage() {
   const { token } = useGuest();
   const { settings } = useSettings();
   const greeting = useGreeting();
+  const online = useOnline();
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
