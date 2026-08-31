@@ -464,10 +464,10 @@ export function mathify(raw: string): string {
 }
 
 export class BoardEngine {
-  readonly mesh: THREE.Mesh;
-  private canvas: HTMLCanvasElement;
+  /** The live 2D writing surface. Mounted straight into the DOM by the stage. */
+  readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private texture: THREE.CanvasTexture;
+  private theme: BoardTheme = "chalkboard";
   private items: Item[] = [];
   private archived: Item[] = [];
   /** Top of the current writing band inside the persistent content space (px). */
