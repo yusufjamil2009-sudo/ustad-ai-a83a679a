@@ -2,7 +2,7 @@
  * Classroom session identity + persistence (Sections 27–32).
  *
  * Every classroom session has a stable sessionId, lessonId and a versioned
- * snapshot of the master timeline, board state, 3D state, teacher state and
+ * snapshot of the master timeline, board state, stage state, teacher state and
  * voice state. The snapshot lives in localStorage, SCOPED BY GUEST, so an
  * active lesson survives a refresh without leaking into another guest.
  *
@@ -17,37 +17,31 @@ import type { TimelineSnapshot } from "./timeline";
 import type { LessonLang } from "./lesson";
 import type { BoardSnapshot } from "./board";
 import type { TeacherAnimation } from "./types";
-import type { RatioMode } from "./cameras";
+import type { BoardTheme } from "./board";
 import type { Object3DKind } from "./types";
 import type { StudentLevel, TeachingLifecycle, TeachingMode } from "../teaching/lifecycle";
 import type { LessonSourceType } from "../teaching/source";
-import type { FieldTripSceneStatus, VisualAvailability } from "../teaching/field-trip";
 
+/** A semantic visual pinned to the 2D stage alongside the board. */
 export type SceneObjectSnapshot = {
   id: string;
   kind: Object3DKind;
-  x: number;
-  y: number;
-  z: number;
-  spin: number;
-  scale: number;
   labels: string[];
+  visible: boolean;
 };
 
 export type TeacherSnapshot = {
   animation: TeacherAnimation;
-  x: number;
-  y: number;
-  z: number;
-  yaw: number;
+  /** 2D stage anchor the teacher stands at */
+  anchor: "board" | "center" | "left" | "right" | "desk";
+  facing: 1 | -1;
 };
 
-export type CameraSnapshot = {
-  yaw: number;
-  pitch: number;
-  zoom: number;
-  pan: [number, number, number];
-  ratio: RatioMode;
+/** 2D stage snapshot (replaces the old 3D camera snapshot). */
+export type StageSnapshot = {
+  theme: BoardTheme;
+  ratio: "auto" | "16:9" | "9:16";
+  scroll: number;
 };
 
 export type ClassroomResumeSnapshot = {
@@ -60,7 +54,7 @@ export type ClassroomResumeSnapshot = {
   scene?: {
     objects: SceneObjectSnapshot[];
     teacher: TeacherSnapshot;
-    camera: CameraSnapshot;
+    stage: StageSnapshot;
     lastTeacherSpeech?: string;
   };
   playing: boolean;
@@ -92,11 +86,11 @@ export type ClassroomSessionSnapshot = {
     branchStepIds: string[];
     resumeIndex: number;
   } | null;
-  /** 3D scene / teacher / camera (Bugs 11, 35). Optional for v1 snapshots. */
+  /** 2D stage / teacher / visuals. Optional for v1 snapshots. */
   scene?: {
     objects: SceneObjectSnapshot[];
     teacher: TeacherSnapshot;
-    camera: CameraSnapshot;
+    stage: StageSnapshot;
     lastTeacherSpeech?: string;
   };
   /** Orchestrator slice — optional so v1 snapshots still restore. */
@@ -106,13 +100,7 @@ export type ClassroomSessionSnapshot = {
     completedConcepts: string[];
     sourceType: LessonSourceType | null;
     studentLevel: StudentLevel | null;
-    fieldTripId?: string | null;
-    fieldTripPoi?: string;
-    fieldTripStatus?: FieldTripSceneStatus | null;
-    fieldTripVisual?: VisualAvailability | null;
   };
-  /** Classroom lesson parked while a field trip is active. */
-  classroomResume?: ClassroomResumeSnapshot;
 };
 
 const SESSION_PREFIX = "ustad.classroom.session.";
