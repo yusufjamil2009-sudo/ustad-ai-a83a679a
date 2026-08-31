@@ -74,7 +74,6 @@ export type Intent =
   | "ocr"
   | "exam"
   | "lesson"
-  | "field-trip"
   | "note"
   | "reminder";
 
@@ -120,12 +119,6 @@ export function detectIntent(text: string, hasImages: boolean): Intent {
   const t = text.toLowerCase();
   if (hasImages) return "image-understanding";
   if (/\b(exam|test|quiz|mcq|paper)\b/.test(t)) return "exam";
-  if (
-    /\b(field\s*trip|virtual\s*(tour|trip|visit)|andar le chalo|ghumake|ghumao|take me (inside|to|on)|visit the)\b/.test(
-      t,
-    )
-  )
-    return "field-trip";
   if (/\b(lesson|chapter|syllabus|teach me|padhao)\b/.test(t)) return "lesson";
   if (/\b(remind|reminder|yaad dila|schedule)\b/.test(t)) return "reminder";
   if (/\b(note|notes|save this)\b/.test(t)) return "note";
@@ -160,8 +153,7 @@ export function detectComplexity(text: string, intent: Intent): Complexity {
     intent === "code" ||
     intent === "math" ||
     intent === "lesson" ||
-    intent === "exam" ||
-    intent === "field-trip"
+    intent === "exam"
   )
     return "complex";
   if (words < 15) return "simple";
