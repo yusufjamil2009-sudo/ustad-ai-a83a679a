@@ -44,7 +44,7 @@ test("buildTeachingPlan produces content-driven durations, not a universal fixed
 });
 
 test("buildDoubtStepsFromAnswer uses the student's exact question", async () => {
-  const { buildDoubtStepsFromAnswer } = await import("../src/lib/classroom3d/lesson");
+  const { buildDoubtStepsFromAnswer } = await import("../src/lib/classroom2d/lesson");
   const q = "Why does photosynthesis stop without light?";
   const steps = buildDoubtStepsFromAnswer(
     q,

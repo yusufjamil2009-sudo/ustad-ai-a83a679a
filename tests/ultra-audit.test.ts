@@ -2,13 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { stripProtectedFields } from "../src/lib/strip-protected";
 import { modelCapabilities, modelCapabilityKnown, modelHas } from "../src/lib/model-capabilities";
-import { selectVisual } from "../src/lib/classroom3d/visual-select";
+import { selectVisual } from "../src/lib/classroom2d/visual-select";
 import { buildTeachingPlan } from "../src/lib/teaching/builder";
 import { fromStudyLessonContent } from "../src/lib/teaching/normalize";
-import { classifyDoubt } from "../src/lib/classroom3d/lesson";
+import { classifyDoubt } from "../src/lib/classroom2d/lesson";
 import { normalizeForSpeech } from "../src/lib/speech-normalize";
 import { gatherWeb, route } from "../src/lib/router.server";
-import { requestId } from "../src/lib/classroom3d/recovery";
+import { requestId } from "../src/lib/classroom2d/recovery";
 
 test("Bug #21: stripProtectedFields drops ownership columns", () => {
   const safe = stripProtectedFields({
@@ -110,7 +110,7 @@ test("Bug #13: requestId is stable for the same doubt identity", () => {
 });
 
 test("Bug #13: runWithRecovery returns the settled success instead of re-calling AI", async () => {
-  const { runWithRecovery } = await import("../src/lib/classroom3d/recovery");
+  const { runWithRecovery } = await import("../src/lib/classroom2d/recovery");
   let n = 0;
   const id = `ultra-audit-${Date.now()}-${Math.random()}`;
   const run = async () => {

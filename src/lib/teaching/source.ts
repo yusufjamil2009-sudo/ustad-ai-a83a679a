@@ -5,7 +5,7 @@
  * sentences. Empty / unreadable input is an honest failure.
  */
 import { extractChapterStructure } from "../book-knowledge/extract";
-import type { StudyLessonContent } from "../classroom3d/lesson";
+import type { StudyLessonContent } from "../classroom2d/lesson";
 import type { TeachingContent } from "./normalize";
 
 export type LessonSourceType = "topic" | "ai-answer" | "textbook" | "pdf" | "notes" | "chat";

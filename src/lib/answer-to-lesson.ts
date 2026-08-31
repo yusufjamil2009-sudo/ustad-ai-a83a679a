@@ -8,7 +8,7 @@
  * many sections / objectives / key points; the timeline builder then splits
  * them semantically into multiple phases, so 100% of the answer remains teachable.
  */
-import type { StudyLessonContent } from "./classroom3d/lesson";
+import type { StudyLessonContent } from "./classroom2d/lesson";
 
 function clean(line: string): string {
   return line

@@ -1,5 +1,5 @@
 /** Hand-off channel: Study Studio → 3D Classroom (client-only, survives a route change/reload). */
-import type { StudyLessonContent } from "./classroom3d/lesson";
+import type { StudyLessonContent } from "./classroom2d/lesson";
 
 const KEY = "ustad.classroom.handoff";
 

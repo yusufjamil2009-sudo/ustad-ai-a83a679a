@@ -9,10 +9,10 @@
  *
  * ClassroomEngine remains the runtime that talks to Three.js.
  */
-import { EventBus } from "../classroom3d/events";
-import { buildLessonPlan, type LessonLang, type StudyLessonContent } from "../classroom3d/lesson";
-import type { ClassroomEngine } from "../classroom3d/engine";
-import type { LessonPlan, LessonStep } from "../classroom3d/types";
+import { EventBus } from "../classroom2d/events";
+import { buildLessonPlan, type LessonLang, type StudyLessonContent } from "../classroom2d/lesson";
+import type { ClassroomEngine } from "../classroom2d/engine";
+import type { LessonPlan, LessonStep } from "../classroom2d/types";
 import { fromStudyLessonContent, type TeachingContent } from "./normalize";
 import { buildTeachingPlan } from "./builder";
 import {

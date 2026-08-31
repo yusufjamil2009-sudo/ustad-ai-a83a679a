@@ -41,13 +41,13 @@ import {
   sessionStorageKey,
   validateSessionOwnership,
   type ClassroomSessionSnapshot,
-} from "../src/lib/classroom3d/session";
+} from "../src/lib/classroom2d/session";
 import { stripProtectedFields } from "../src/lib/strip-protected";
 import { classifyTeachingSignal, shouldAdapt, adaptiveSay } from "../src/lib/teaching/signals";
 import { TeachingOrchestrator, planTeaching } from "../src/lib/teaching/orchestrator";
 import { wantsImageGeneration, imagePromptFrom } from "../src/lib/image-gen.server";
-import { VOICE_UNAVAILABLE_MESSAGE } from "../src/lib/classroom3d/voice";
-import { buildLessonPlan } from "../src/lib/classroom3d/lesson";
+import { VOICE_UNAVAILABLE_MESSAGE } from "../src/lib/classroom2d/voice";
+import { buildLessonPlan } from "../src/lib/classroom2d/lesson";
 
 function memStore() {
   const m = new Map<string, string>();

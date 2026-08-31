@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TimelineEngine } from "../src/lib/classroom3d/timeline";
-import type { LessonPlan } from "../src/lib/classroom3d/types";
-import { buildDoubtStepsFromAnswer } from "../src/lib/classroom3d/lesson";
+import { TimelineEngine } from "../src/lib/classroom2d/timeline";
+import type { LessonPlan } from "../src/lib/classroom2d/types";
+import { buildDoubtStepsFromAnswer } from "../src/lib/classroom2d/lesson";
 import { chunkSource } from "../src/lib/study.server";
 import { modelHas, modelCapabilities } from "../src/lib/model-capabilities";
 import { fromStudyLessonContent } from "../src/lib/teaching/normalize";

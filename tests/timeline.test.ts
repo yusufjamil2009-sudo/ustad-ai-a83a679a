@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TimelineEngine } from "../src/lib/classroom3d/timeline";
-import type { LessonPlan } from "../src/lib/classroom3d/types";
+import { TimelineEngine } from "../src/lib/classroom2d/timeline";
+import type { LessonPlan } from "../src/lib/classroom2d/types";
 
 function plan(): LessonPlan {
   const step = (id: string, duration: number, say = `say ${id}`) => ({
