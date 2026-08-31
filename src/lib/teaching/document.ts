@@ -9,7 +9,6 @@ import { extractChapterFromBookText, listChapterHeadings } from "../book-knowled
 import { extractChapterStructure } from "../book-knowledge/extract";
 import type { TeachingContent } from "./normalize";
 import type { LessonLang } from "../classroom2d/lesson";
-import { shouldRecommendFieldTrip } from "./field-trip";
 import { ingestSourceText, type SourceDocument } from "./source";
 
 export type DetectedChapter = {
@@ -41,7 +40,6 @@ export type DocumentLessonResult = {
   pages: PageStat[];
   failedPages: number[];
   quality: ExtractionQuality;
-  recommendFieldTrip: boolean;
   teaching: TeachingContent | null;
   sourceDocument: SourceDocument | null;
   source: {
@@ -236,7 +234,6 @@ export function buildDocumentLessonFromText(opts: {
     pages,
     failedPages,
     quality,
-    recommendFieldTrip: false,
     sourceDocument: null,
     source: {
       sourceType: opts.sourceType,
@@ -312,7 +309,6 @@ export function buildDocumentLessonFromText(opts: {
       : quality.notes.length
         ? `Ready with warnings: ${quality.notes.join(" ")}`
         : "Ready — lesson is grounded in the uploaded text.",
-    recommendFieldTrip: shouldRecommendFieldTrip(chapterName + " " + teaching.title),
     teaching,
     sourceDocument: ingested.ok ? ingested.document : null,
     source: {

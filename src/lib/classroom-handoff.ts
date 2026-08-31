@@ -7,7 +7,6 @@ export type ClassroomHandoff = {
   topic: string;
   content?: StudyLessonContent;
   autoplay?: boolean;
-  fieldTrip?: boolean;
   studentLevel?: "beginner" | "intermediate" | "advanced";
   sourceType?: "topic" | "ai-answer" | "textbook" | "pdf" | "notes" | "chat";
   sourceId?: string;

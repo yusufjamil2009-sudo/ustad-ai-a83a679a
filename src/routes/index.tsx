@@ -28,7 +28,6 @@ import { useGreeting } from "@/hooks/useGreeting";
 import { useOnline } from "@/hooks/usePwa";
 import { UstadLogo } from "@/components/UstadLogo";
 import { setClassroomHandoff } from "@/lib/classroom-handoff";
-import { wantsFieldTrip } from "@/lib/teaching/field-trip";
 import { answerToLessonContent } from "@/lib/answer-to-lesson";
 import { localTimeZone } from "@/lib/chrono-engine";
 import { speakMessage, stopSpeaking } from "@/lib/tts";
@@ -336,17 +335,12 @@ function ChatPage() {
 
   const teachIn3D = (m: Message, question: string) => {
     const topic = (question || "USTAD answer").slice(0, 70);
-    if (wantsFieldTrip(question) || wantsFieldTrip(m.content.slice(0, 200))) {
-      setClassroomHandoff({ topic, fieldTrip: true, autoplay: true });
-      toast.success("Opening virtual field trip…");
-    } else {
-      setClassroomHandoff({
-        topic,
-        content: answerToLessonContent(question, m.content),
-        autoplay: true,
-      });
-      toast.success("Opening this answer in the 3D Classroom…");
-    }
+    setClassroomHandoff({
+      topic,
+      content: answerToLessonContent(question, m.content),
+      autoplay: true,
+    });
+    toast.success("Opening this answer in the 2D Classroom…");
     void navigate({ to: "/classroom" });
   };
 
