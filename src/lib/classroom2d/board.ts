@@ -1649,8 +1649,51 @@ export class BoardEngine {
       }
       c.restore();
     }
+    this.paintStrokes(c, scrollY, viewH);
     c.textBaseline = "alphabetic";
   }
+
+  /** Freehand (mouse/touch/stylus) chalk strokes, pressure-varied width. */
+  private paintStrokes(c: CanvasRenderingContext2D, scrollY: number, viewH: number): void {
+    const all = this.live ? [...this.strokes, this.live] : this.strokes;
+    c.save();
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    for (const s of all) {
+      const pts = s.points;
+      if (pts.length < 2) {
+        const p = pts[0];
+        if (!p) continue;
+        const y = p[1] - scrollY;
+        if (y < -40 || y > viewH + 40) continue;
+        c.fillStyle = ink(s.color);
+        c.globalAlpha = 0.92;
+        c.beginPath();
+        c.arc(p[0], y, Math.max(1, (s.size * p[2]) / 2), 0, Math.PI * 2);
+        c.fill();
+        continue;
+      }
+      c.strokeStyle = ink(s.color);
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1]!;
+        const b = pts[k]!;
+        const ay = a[1] - scrollY;
+        const by = b[1] - scrollY;
+        if ((ay < -40 && by < -40) || (ay > viewH + 40 && by > viewH + 40)) continue;
+        // pressure → width, with a chalky alpha so fast light strokes fade
+        const press = (a[2] + b[2]) / 2;
+        c.lineWidth = Math.max(1.2, s.size * press);
+        c.globalAlpha = 0.55 + 0.45 * press;
+        c.beginPath();
+        c.moveTo(a[0], ay);
+        c.lineTo(b[0], by);
+        c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  }
+
 
   dispose(): void {
     // §46/§49: no callback can fire into a disposed engine.
