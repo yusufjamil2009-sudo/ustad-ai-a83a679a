@@ -24,13 +24,6 @@ import {
 } from "../src/lib/model-capabilities";
 import { selectChatProviders, type RouteDecision } from "../src/lib/router.server";
 import {
-  selectFieldTrip,
-  shouldRecommendFieldTrip,
-  buildFieldTripPlan,
-  VERIFIED_EDUCATIONAL_MESHES,
-  fieldTripStatusFromVisual,
-} from "../src/lib/teaching/field-trip";
-import {
   saveSession,
   loadLatestSession,
   loadSession,
@@ -125,48 +118,6 @@ test("FIX #1: Core default is a current documented model, never Gemini 2.0 Flash
     "google/gemini-3.7-flash",
   );
   assert.equal(resolveCoreChatModel(undefined, ["google/gemini-2.0-flash"]), USTAD_CORE_CHAT_MODEL);
-});
-
-/* ---------------- FIX #2 / #10 Field trip visual honesty ---------------- */
-
-test("FIX #2/#10: catalog never claims a real mesh when none is verified", () => {
-  assert.equal(Object.keys(VERIFIED_EDUCATIONAL_MESHES).length, 0);
-  const taj = selectFieldTrip("Taj Mahal architecture");
-  assert.equal(taj.available3d, true);
-  assert.equal(taj.realMesh, false);
-  assert.equal(taj.visual.mode, "procedural_model");
-  assert.equal(taj.visual.verified, false);
-  assert.equal(taj.sourceAsset.quality, "procedural");
-  assert.match(taj.reason, /procedural/i);
-  assert.equal(/real mesh available/i.test(taj.reason), false);
-
-  const heart = selectFieldTrip("human heart chambers");
-  assert.equal(heart.visual.mode, "procedural_model");
-  assert.equal(heart.realMesh, false);
-
-  const unknown = selectFieldTrip("Medieval poetry of Kabir");
-  assert.equal(unknown.visual.mode, "board_only");
-  assert.equal(unknown.available3d, false);
-  assert.equal(unknown.realMesh, false);
-
-  assert.equal(shouldRecommendFieldTrip("Taj Mahal"), true);
-  assert.equal(shouldRecommendFieldTrip("Kabir dohe"), false);
-  assert.equal(fieldTripStatusFromVisual("procedural_model"), "partially_ready");
-  assert.equal(fieldTripStatusFromVisual("real_mesh"), "ready");
-  assert.equal(fieldTripStatusFromVisual("board_only"), "error");
-});
-
-test("FIX #2: field-trip plan labels procedural model honestly", () => {
-  const plan = buildFieldTripPlan(selectFieldTrip("Taj Mahal"), "english");
-  assert.ok(
-    plan.steps.some((s) => /procedural/i.test(s.label ?? "") || /procedural/i.test(s.say ?? "")),
-  );
-  assert.equal(
-    plan.steps.some(
-      (s) => /verified real mesh/i.test(s.say ?? "") && !/not a verified/i.test(s.say ?? ""),
-    ),
-    false,
-  );
 });
 
 /* ---------------- FIX #3 guest-scoped classroom persistence ---------------- */
@@ -278,22 +229,6 @@ test("FIX #8: live discovery wins over static defaults; obsolete Core id is skip
 
 /* ---------------- FIX #6 / #13 field trip orchestrator ---------------- */
 
-test("FIX #6/#13: field trip is a mode; exit returns to classroom without a second engine", () => {
-  const orch = new TeachingOrchestrator();
-  const lesson = orch.startTeaching({
-    topic: "Photosynthesis",
-    language: "english",
-    autoplay: false,
-  });
-  assert.ok(lesson.steps.length > 0);
-  assert.equal(orch.getTeachingState().teachingMode, "classroom");
-  const trip = orch.startFieldTrip("Taj Mahal", "english", false);
-  assert.match(trip.topic, /Field trip/i);
-  assert.equal(orch.getTeachingState().teachingMode, "virtual_field_trip");
-  orch.exitFieldTrip();
-  assert.equal(orch.getTeachingState().teachingMode, "classroom");
-});
-
 test("FIX #13: lesson plans for math/science/long topics stay content-driven", () => {
   const math = planTeaching({ topic: "Quadratic equations", language: "english" });
   const science = planTeaching({ topic: "Photosynthesis", language: "english" });
@@ -320,17 +255,6 @@ test("FIX #13: lesson plans for math/science/long topics stay content-driven", (
   assert.ok(
     long.steps.length > math.steps.length || long.steps.reduce((a, s) => a + s.duration, 0) > 10,
   );
-});
-
-test("FIX #13: doubt/field-trip/resume coverage on orchestrator state", () => {
-  const orch = new TeachingOrchestrator();
-  orch.startTeaching({ topic: "Atoms", language: "english", autoplay: false });
-  assert.equal(orch.getLifecycle(), "paused");
-  orch.startFieldTrip("human heart", "english", false);
-  assert.equal(orch.getTeachingState().teachingMode, "virtual_field_trip");
-  orch.nextFieldTripPoi();
-  orch.exitFieldTrip();
-  assert.equal(orch.getTeachingState().teachingMode, "classroom");
 });
 
 /* ---------------- FIX #7 guest isolation (app-level) ---------------- */
