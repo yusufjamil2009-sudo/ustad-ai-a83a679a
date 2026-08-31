@@ -884,7 +884,7 @@ export class BoardEngine {
         mathAsc: box.asc + 8,
         text: src,
         size: ms,
-        color: "#ffe6b0",
+        color: INK.warm,
         language: "en",
         writeMs: Math.max(1200, writeDurationMs(src, ms)),
       },
@@ -980,7 +980,7 @@ export class BoardEngine {
         lines: fitted.lines,
         text,
         size: fitted.size,
-        color: role === "title" ? "#ffe6b0" : "#f4f7ff",
+        color: role === "title" ? INK.warm : INK.ink,
         language: detectLang(text),
         writeMs: writeDurationMs(text, fitted.size),
       });
@@ -1106,7 +1106,7 @@ export class BoardEngine {
           w: Math.max(...xs) - minX + 28,
           h: Math.max(...ys) - minY + 28,
           points: op.points,
-          color: "#7fe3d4",
+          color: INK.cool,
           language: "en",
           writeMs: 600 + op.points.length * 60,
         });
@@ -1130,7 +1130,7 @@ export class BoardEngine {
           role: "mark",
           w,
           h,
-          color: "#ffd489",
+          color: INK.hl,
           language: "en",
           writeMs: 900,
         });
@@ -1152,7 +1152,7 @@ export class BoardEngine {
           role: "diagram",
           w: Math.min(intrinsic.w, r.w - 20),
           h: Math.min(intrinsic.h, r.h - 20),
-          color: "#7fe3d4",
+          color: INK.cool,
           language: "en",
           diagram: { kind: op.kind, title: op.title, data: op.data, labels: op.labels },
           writeMs: 4200,
@@ -1284,7 +1284,7 @@ export class BoardEngine {
         z: it.z,
         scale: it.scale,
         reveal: 1, // restored content is already fully written
-        color: it.color ?? "#f4f7ff",
+        color: it.color ?? INK.ink,
         language: it.text ? detectLang(it.text) : "en",
         writeMs: 0,
         ...(it.text ? { text: it.text } : {}),
@@ -1470,10 +1470,10 @@ export class BoardEngine {
         const total = i.lines.join("").length || 1;
         let shownChars = Math.ceil(total * i.reveal);
         if (i.highlight) {
-          c.fillStyle = "rgba(255, 212, 137, 0.2)";
+          c.fillStyle = PAL.hlFill;
           c.fillRect(-12, -8, i.w + 12, i.h);
         }
-        c.fillStyle = i.color;
+        c.fillStyle = ink(i.color);
         c.font = `600 ${size}px ${FONT_STACK}`;
         const clusterIdx = i.lines.map((l) => clusterStarts(l));
         const totalClusters = clusterIdx.reduce((a, s) => a + s.length, 0) || 1;
@@ -1488,7 +1488,7 @@ export class BoardEngine {
           if (boundary > 0) c.fillText(visible, 0, k * lh);
         });
         if (i.underline && i.reveal >= 1) {
-          c.strokeStyle = "#ffd489";
+          c.strokeStyle = ink(INK.hl);
           c.lineWidth = 6;
           const uw = this.measure(i.lines, size);
           c.beginPath();
@@ -1497,7 +1497,7 @@ export class BoardEngine {
           c.stroke();
         }
         if (i.circled && i.reveal >= 1) {
-          c.strokeStyle = "#ff9f7a";
+          c.strokeStyle = ink(INK.accent);
           c.lineWidth = 6;
           c.beginPath();
           c.ellipse(i.w / 2 - 6, i.h / 2, i.w / 2 + 20, i.h / 2 + 14, 0, 0, Math.PI * 2);
@@ -1523,7 +1523,7 @@ export class BoardEngine {
         );
         if (res.tip) i.tip = [i.x + res.tip[0] * i.scale, i.y + res.tip[1] * i.scale];
         if (i.underline && i.reveal >= 1) {
-          c.strokeStyle = "#ffd489";
+          c.strokeStyle = ink(INK.hl);
           c.lineWidth = 6;
           c.beginPath();
           c.moveTo(0, (i.mathAsc ?? 0) + 16);
@@ -1531,7 +1531,7 @@ export class BoardEngine {
           c.stroke();
         }
       } else if (i.kind === "path" && i.points?.length) {
-        c.strokeStyle = i.color;
+        c.strokeStyle = ink(i.color);
         c.lineWidth = 8;
         c.lineJoin = "round";
         c.lineCap = "round";
@@ -1547,8 +1547,8 @@ export class BoardEngine {
         const by = i.from?.[1] ?? 0;
         const ex = bx + (i.to[0] - bx) * i.reveal;
         const ey = by + (i.to[1] - by) * i.reveal;
-        c.strokeStyle = i.color;
-        c.fillStyle = i.color;
+        c.strokeStyle = ink(i.color);
+        c.fillStyle = ink(i.color);
         c.lineWidth = 8;
         c.beginPath();
         c.moveTo(bx, by);
@@ -1616,8 +1616,8 @@ function drawDiagram(
   reveal: number,
 ): void {
   c.save();
-  c.strokeStyle = "#7fe3d4";
-  c.fillStyle = "#7fe3d4";
+  c.strokeStyle = ink(INK.cool);
+  c.fillStyle = ink(INK.cool);
   c.lineWidth = 6;
   c.font = `600 38px ${FONT_STACK}`;
   if (d.title) c.fillText(d.title, 0, -30);
@@ -1626,7 +1626,7 @@ function drawDiagram(
     if (reveal < at) return;
     c.save();
     c.globalAlpha = Math.min(1, (reveal - at) / 0.12);
-    c.fillStyle = "#dbe6ff";
+    c.fillStyle = ink(INK.ink2);
     c.font = `500 30px ${FONT_STACK}`;
     c.fillText(text, x, y);
     c.restore();
@@ -1639,7 +1639,7 @@ function drawDiagram(
       const max = Math.max(...data);
       data.forEach((v, i) => {
         const h = (v / max) * 320 * reveal;
-        c.fillStyle = i % 2 ? "#ffd489" : "#7fe3d4";
+        c.fillStyle = i % 2 ? ink(INK.hl) : ink(INK.cool);
         c.fillRect(i * 110, 360 - h, 74, h);
         label(labels[i] ?? String(v), i * 110, 400, (i + 0.8) / data.length);
       });
@@ -1703,16 +1703,16 @@ function drawDiagram(
     }
     case "photosynthesis": {
       // sun -> leaf -> outputs
-      c.fillStyle = "#ffd489";
+      c.fillStyle = ink(INK.hl);
       c.beginPath();
       c.arc(60, 60, 44 * reveal, 0, Math.PI * 2);
       c.fill();
-      c.strokeStyle = "#ffd489";
+      c.strokeStyle = ink(INK.hl);
       c.beginPath();
       c.moveTo(100, 100);
       c.lineTo(210 * reveal, 190 * reveal);
       c.stroke();
-      c.fillStyle = "#6fd08c";
+      c.fillStyle = ink(INK.good);
       c.beginPath();
       c.ellipse(300, 230, 130 * reveal, 76 * reveal, -0.5, 0, Math.PI * 2);
       c.fill();
