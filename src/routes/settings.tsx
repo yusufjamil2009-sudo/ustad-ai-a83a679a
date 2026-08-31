@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Loader2, KeyRound, User, Sliders, ShieldAlert, Trash2, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/AppShell";
+import { PwaInstallCard } from "@/components/PwaInstallCard";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 
 import { Button } from "@/components/ui/button";
