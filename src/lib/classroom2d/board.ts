@@ -1489,16 +1489,24 @@ export class BoardEngine {
   }
 
   private paint(): void {
-    const c = this.ctx;
+    this.paintTo(this.ctx, this.scrollY, H);
+  }
+
+  /**
+   * Render the board into ANY 2D context, for a given scroll offset and
+   * viewport height. The live canvas and the exporter share this one painter,
+   * so an exported PNG/PDF is pixel-identical to what the class saw.
+   */
+  paintTo(c: CanvasRenderingContext2D, scrollY: number, viewH: number): void {
     PAL = PALETTES[this.theme];
-    const grad = c.createLinearGradient(0, 0, 0, H);
+    const grad = c.createLinearGradient(0, 0, 0, viewH);
     grad.addColorStop(0, PAL.bg0);
     grad.addColorStop(1, PAL.bg1);
     c.fillStyle = grad;
-    c.fillRect(0, 0, W, H);
+    c.fillRect(0, 0, W, viewH);
     c.strokeStyle = PAL.frame;
     c.lineWidth = 6;
-    c.strokeRect(24, 24, W - 48, H - 48);
+    c.strokeRect(24, 24, W - 48, viewH - 48);
     c.fillStyle = PAL.watermark;
     c.font = `600 34px ${FONT_STACK}`;
     c.textAlign = "right";
@@ -1510,14 +1518,15 @@ export class BoardEngine {
     // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
     // has scrolled out stays in the item list (never deleted) and simply is not
     // rasterised this frame.
-    const viewTop = this.scrollY - PAD;
-    const viewBottom = this.scrollY + H + PAD;
+    const viewTop = scrollY - PAD;
+    const viewBottom = scrollY + viewH + PAD;
     for (const i of this.items) {
       const r = this.rectOf(i);
       if (r.y + r.h < viewTop || r.y > viewBottom) continue;
       c.save();
-      c.translate(i.x, i.y - this.scrollY);
+      c.translate(i.x, i.y - scrollY);
       c.scale(i.scale, i.scale);
+
       if (i.kind === "text" && i.lines?.length && i.size) {
         const size = i.size;
         const lh = size * 1.32;
