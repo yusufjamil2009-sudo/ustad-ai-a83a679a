@@ -703,6 +703,189 @@ export class BoardEngine {
     return { u: clamp(x / W, 0, 1), v: clamp(vy / H, 0, 1) };
   }
 
+  /* ---------------- freehand drawing (mouse / touch / stylus) ---------------- */
+
+  /** Turn the board into a live drawing surface (pointer draws instead of scroll-drag). */
+  setDrawMode(on: boolean): void {
+    this.drawMode = on;
+    this.canvas.style.cursor = on ? "crosshair" : "grab";
+    if (!on) this.endStroke();
+  }
+
+  get drawing(): boolean {
+    return this.drawMode;
+  }
+
+  setPenSize(px: number): void {
+    this.penSize = clamp(px, 2, 64);
+  }
+
+  get penWidth(): number {
+    return this.penSize;
+  }
+
+  setPenColor(color: string): void {
+    this.penColor = color;
+  }
+
+  get penInk(): string {
+    return this.penColor;
+  }
+
+  /** Client (CSS px within the canvas element) → board CONTENT coordinates. */
+  clientToContent(clientX: number, clientY: number): [number, number] {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((clientX - r.left) / Math.max(1, r.width)) * W;
+    const y = ((clientY - r.top) / Math.max(1, r.height)) * H + this.scrollY;
+    return [x, y];
+  }
+
+  beginStroke(x: number, y: number, pressure = 0.5): void {
+    this.live = { points: [[x, y, this.pressure(pressure)]], color: this.penColor, size: this.penSize };
+    this.dirty = true;
+  }
+
+  extendStroke(x: number, y: number, pressure = 0.5): void {
+    const s = this.live;
+    if (!s) return;
+    const last = s.points[s.points.length - 1]!;
+    if (Math.hypot(x - last[0], y - last[1]) < 1.2) return;
+    s.points.push([x, y, this.pressure(pressure)]);
+    this.dirty = true;
+    this.onChalk?.();
+  }
+
+  endStroke(): void {
+    if (!this.live) return;
+    if (this.live.points.length) this.strokes.push(this.live);
+    this.live = null;
+    this.dirty = true;
+  }
+
+  undoStroke(): void {
+    if (!this.strokes.pop()) return;
+    this.dirty = true;
+  }
+
+  clearStrokes(): void {
+    if (!this.strokes.length && !this.live) return;
+    this.strokes = [];
+    this.live = null;
+    this.dirty = true;
+  }
+
+  get strokeCount(): number {
+    return this.strokes.length;
+  }
+
+  private pressure(p: number): number {
+    // mouse reports 0 or 0.5 — normalise into a usable chalk pressure curve
+    const v = p > 0 ? p : 0.5;
+    return clamp(0.35 + v * 0.85, 0.2, 1.2);
+  }
+
+  /**
+   * Attach real pointer + wheel interaction to the board canvas:
+   * draw (draw mode) / drag-scroll + wheel scroll (read mode).
+   */
+  attachInput(): () => void {
+    const el = this.canvas;
+    let panning = false;
+    let lastY = 0;
+    el.style.touchAction = "none";
+    el.style.cursor = "grab";
+
+    const down = (e: PointerEvent) => {
+      el.setPointerCapture(e.pointerId);
+      if (this.drawMode) {
+        const [x, y] = this.clientToContent(e.clientX, e.clientY);
+        this.beginStroke(x, y, e.pressure);
+      } else {
+        panning = true;
+        lastY = e.clientY;
+        el.style.cursor = "grabbing";
+      }
+    };
+    const move = (e: PointerEvent) => {
+      if (this.drawMode) {
+        if (!this.live) return;
+        const [x, y] = this.clientToContent(e.clientX, e.clientY);
+        this.extendStroke(x, y, e.pressure);
+      } else if (panning) {
+        const r = el.getBoundingClientRect();
+        const scale = H / Math.max(1, r.height);
+        this.scrollTo(this.scroll - (e.clientY - lastY) * scale, true);
+        lastY = e.clientY;
+      }
+    };
+    const up = (e: PointerEvent) => {
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      this.endStroke();
+      panning = false;
+      if (!this.drawMode) el.style.cursor = "grab";
+    };
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      const r = el.getBoundingClientRect();
+      this.scrollTo(this.scroll + dy * (H / Math.max(1, r.height)), true);
+    };
+
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      el.removeEventListener("wheel", wheel);
+    };
+  }
+
+  /* ---------------- export ---------------- */
+
+  /** Height of everything worth exporting (taught content + freehand strokes). */
+  get exportHeight(): number {
+    const strokeBottom = [...this.strokes, ...(this.live ? [this.live] : [])].reduce(
+      (m, s) => Math.max(m, ...s.points.map((p) => p[1] + 40)),
+      0,
+    );
+    return Math.max(this.contentHeight, strokeBottom, H);
+  }
+
+  /**
+   * Render the whole written board (all scrolled bands) into page-sized
+   * canvases — used for PNG and PDF export of the class notes.
+   */
+  exportPages(pageH = H): HTMLCanvasElement[] {
+    const total = Math.ceil(this.exportHeight);
+    const pages: HTMLCanvasElement[] = [];
+    for (let y = 0; y < total; y += pageH) {
+      const cv = document.createElement("canvas");
+      cv.width = W;
+      cv.height = pageH;
+      const c = cv.getContext("2d");
+      if (!c) break;
+      this.paintTo(c, y, pageH);
+      pages.push(cv);
+    }
+    return pages.length ? pages : [this.canvas];
+  }
+
+  /** Single tall PNG of everything written on the board. */
+  exportImageCanvas(): HTMLCanvasElement {
+    const total = Math.max(H, Math.ceil(this.exportHeight));
+    const cv = document.createElement("canvas");
+    cv.width = W;
+    cv.height = total;
+    const c = cv.getContext("2d")!;
+    this.paintTo(c, 0, total);
+    return cv;
+  }
+
 
   /* ---------------- layout engine ---------------- */
 
@@ -1489,16 +1672,24 @@ export class BoardEngine {
   }
 
   private paint(): void {
-    const c = this.ctx;
+    this.paintTo(this.ctx, this.scrollY, H);
+  }
+
+  /**
+   * Render the board into ANY 2D context, for a given scroll offset and
+   * viewport height. The live canvas and the exporter share this one painter,
+   * so an exported PNG/PDF is pixel-identical to what the class saw.
+   */
+  paintTo(c: CanvasRenderingContext2D, scrollY: number, viewH: number): void {
     PAL = PALETTES[this.theme];
-    const grad = c.createLinearGradient(0, 0, 0, H);
+    const grad = c.createLinearGradient(0, 0, 0, viewH);
     grad.addColorStop(0, PAL.bg0);
     grad.addColorStop(1, PAL.bg1);
     c.fillStyle = grad;
-    c.fillRect(0, 0, W, H);
+    c.fillRect(0, 0, W, viewH);
     c.strokeStyle = PAL.frame;
     c.lineWidth = 6;
-    c.strokeRect(24, 24, W - 48, H - 48);
+    c.strokeRect(24, 24, W - 48, viewH - 48);
     c.fillStyle = PAL.watermark;
     c.font = `600 34px ${FONT_STACK}`;
     c.textAlign = "right";
@@ -1510,14 +1701,15 @@ export class BoardEngine {
     // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
     // has scrolled out stays in the item list (never deleted) and simply is not
     // rasterised this frame.
-    const viewTop = this.scrollY - PAD;
-    const viewBottom = this.scrollY + H + PAD;
+    const viewTop = scrollY - PAD;
+    const viewBottom = scrollY + viewH + PAD;
     for (const i of this.items) {
       const r = this.rectOf(i);
       if (r.y + r.h < viewTop || r.y > viewBottom) continue;
       c.save();
-      c.translate(i.x, i.y - this.scrollY);
+      c.translate(i.x, i.y - scrollY);
       c.scale(i.scale, i.scale);
+
       if (i.kind === "text" && i.lines?.length && i.size) {
         const size = i.size;
         const lh = size * 1.32;
@@ -1640,8 +1832,51 @@ export class BoardEngine {
       }
       c.restore();
     }
+    this.paintStrokes(c, scrollY, viewH);
     c.textBaseline = "alphabetic";
   }
+
+  /** Freehand (mouse/touch/stylus) chalk strokes, pressure-varied width. */
+  private paintStrokes(c: CanvasRenderingContext2D, scrollY: number, viewH: number): void {
+    const all = this.live ? [...this.strokes, this.live] : this.strokes;
+    c.save();
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    for (const s of all) {
+      const pts = s.points;
+      if (pts.length < 2) {
+        const p = pts[0];
+        if (!p) continue;
+        const y = p[1] - scrollY;
+        if (y < -40 || y > viewH + 40) continue;
+        c.fillStyle = ink(s.color);
+        c.globalAlpha = 0.92;
+        c.beginPath();
+        c.arc(p[0], y, Math.max(1, (s.size * p[2]) / 2), 0, Math.PI * 2);
+        c.fill();
+        continue;
+      }
+      c.strokeStyle = ink(s.color);
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1]!;
+        const b = pts[k]!;
+        const ay = a[1] - scrollY;
+        const by = b[1] - scrollY;
+        if ((ay < -40 && by < -40) || (ay > viewH + 40 && by > viewH + 40)) continue;
+        // pressure → width, with a chalky alpha so fast light strokes fade
+        const press = (a[2] + b[2]) / 2;
+        c.lineWidth = Math.max(1.2, s.size * press);
+        c.globalAlpha = 0.55 + 0.45 * press;
+        c.beginPath();
+        c.moveTo(a[0], ay);
+        c.lineTo(b[0], by);
+        c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  }
+
 
   dispose(): void {
     // §46/§49: no callback can fire into a disposed engine.
