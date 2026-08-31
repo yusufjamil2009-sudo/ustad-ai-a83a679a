@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useGuest } from "@/lib/ustad-client";
 import { useSettings } from "@/lib/settings-store";
 import { useGreeting } from "@/hooks/useGreeting";
+import { useOnline } from "@/hooks/usePwa";
 import { UstadLogo } from "@/components/UstadLogo";
 import { setClassroomHandoff } from "@/lib/classroom-handoff";
 import { wantsFieldTrip } from "@/lib/teaching/field-trip";
@@ -157,6 +158,7 @@ function ChatPage() {
   const { token } = useGuest();
   const { settings } = useSettings();
   const greeting = useGreeting();
+  const online = useOnline();
   const navigate = useNavigate();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -488,6 +490,15 @@ function ChatPage() {
               {status || "USTAD AI is ready."}
             </p>
           </div>
+
+          {online ? null : (
+            <div
+              role="status"
+              className="border-b border-border bg-card/70 px-3 py-2 text-center text-xs text-muted-foreground md:px-8"
+            >
+              You are offline — saved pages still open, but AI replies need a connection.
+            </div>
+          )}
 
           <div className="hide-scrollbar flex-1 space-y-4 overflow-y-auto px-3 py-6 md:px-8">
             {messages.length === 0 ? (

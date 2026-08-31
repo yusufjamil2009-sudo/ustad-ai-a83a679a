@@ -17,6 +17,9 @@ export default defineConfig({
     plugins: [
       VitePWA({
         strategies: "generateSW",
+        // TanStack Start emits the browser bundle to dist/client; the SW must
+        // sit next to it so it is served from the site root.
+        outDir: "dist/client",
         registerType: "autoUpdate",
         // The guarded wrapper in src/lib/pwa.ts is the ONLY registrar.
         injectRegister: null,

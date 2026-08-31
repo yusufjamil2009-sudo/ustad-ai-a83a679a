@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Loader2, KeyRound, User, Sliders, ShieldAlert, Trash2, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/AppShell";
+import { PwaInstallCard } from "@/components/PwaInstallCard";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 
 import { Button } from "@/components/ui/button";
@@ -102,8 +103,9 @@ function SettingsPage() {
           <TabsContent value="profile" className="mt-4">
             <ProfilePanel initial={(session?.profile ?? null) as Record<string, unknown> | null} />
           </TabsContent>
-          <TabsContent value="prefs" className="mt-4">
+          <TabsContent value="prefs" className="mt-4 space-y-4">
             <PrefsPanel />
+            <PwaInstallCard />
           </TabsContent>
           <TabsContent value="data" className="mt-4">
             <DataPanel token={token} guestId={session?.guestId ?? ""} />
