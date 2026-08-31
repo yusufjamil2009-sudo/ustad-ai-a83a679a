@@ -1589,7 +1589,6 @@ export class BoardEngine {
       c.restore();
     }
     c.textBaseline = "alphabetic";
-    this.texture.needsUpdate = true;
   }
 
   dispose(): void {
@@ -1599,11 +1598,9 @@ export class BoardEngine {
     delete this.onWriteEnd;
     this.items = [];
     this.archived = [];
-    this.texture.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.geometry.dispose();
-    this.mesh.removeFromParent();
+    this.canvas.remove();
   }
+
 }
 
 /** Diagram engine — procedural educational diagrams drawn on the board canvas. */
