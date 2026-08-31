@@ -495,32 +495,12 @@ export class BoardEngine {
   private minSize = 46;
   private sizeScale = 1;
 
-  constructor(maxAnisotropy = 8) {
+  constructor() {
     this.canvas = document.createElement("canvas");
     this.canvas.width = W;
     this.canvas.height = H;
+    this.canvas.className = "ustad-board-canvas";
     this.ctx = this.canvas.getContext("2d")!;
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    // Always max sharpness: the board texture never follows the quality tier.
-    this.texture.anisotropy = Math.max(8, maxAnisotropy);
-    this.texture.generateMipmaps = true;
-    this.texture.minFilter = THREE.LinearMipmapLinearFilter;
-    this.texture.magFilter = THREE.LinearFilter;
-
-    // The board is the focal teaching surface, hung at real human writing height.
-    const geo = new THREE.PlaneGeometry(SURFACE_W, SURFACE_H);
-    const mat = new THREE.MeshStandardMaterial({
-      map: this.texture,
-      roughness: 0.42,
-      metalness: 0.02,
-      emissive: new THREE.Color(0x0b1b18),
-      emissiveIntensity: 0.22,
-    });
-    this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.position.set(0, SURFACE_Y, SURFACE_Z);
-    this.mesh.receiveShadow = true;
-    this.mesh.name = "board";
     this.paint();
   }
 
@@ -544,20 +524,25 @@ export class BoardEngine {
     this.dirty = true;
   }
 
-  /**
-   * Quality hook. Decorative response only — the board keeps full-resolution text
-   * and simply brightens its own emissive so it stays crisp when scene lighting
-   * and post-processing are reduced.
-   */
-  setQuality(q: "low" | "medium" | "high"): void {
-    const mat = this.mesh.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = q === "low" ? 0.34 : q === "medium" ? 0.28 : 0.22;
-    mat.needsUpdate = true;
+  /** Board surface theme — chalkboard (green), blackboard, or whiteboard. */
+  setTheme(theme: BoardTheme): void {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.dirty = true;
   }
 
-  /** World size of the writing surface — used by camera framing and teacher IK. */
+  getTheme(): BoardTheme {
+    return this.theme;
+  }
+
+  /** Kept for API parity; 2D board readability never follows a quality tier. */
+  setQuality(_q: "low" | "medium" | "high"): void {
+    /* board text is always full resolution */
+  }
+
+  /** Pixel size of the writing surface (canvas space). */
   get surface(): { width: number; height: number } {
-    return { width: SURFACE_W, height: SURFACE_H };
+    return { width: W, height: H };
   }
 
   /** True while any element is still being written/drawn — gates the timeline. */
@@ -565,18 +550,15 @@ export class BoardEngine {
     return this.items.some((i) => i.reveal < 1);
   }
 
-  /** Canvas px → world point on the board (for hand IK / pen tracking). */
-  pointToWorld(x: number, y: number, out: THREE.Vector3 = new THREE.Vector3()): THREE.Vector3 {
-    const { width, height } = this.surface;
-    // content px → VIEWPORT px (the scrolled window is what physically exists
-    // on the board surface), so the teacher's hand tracks what is visible.
+  /**
+   * Content px → normalised VIEWPORT position (0..1, 0..1) of the live pen tip.
+   * The 2D teacher uses this to place its writing hand over the board.
+   */
+  pointToViewport(x: number, y: number): { u: number; v: number } {
     const vy = clamp(y - this.scrollY, 0, H);
-    return out.set(
-      this.mesh.position.x + (x / W - 0.5) * width,
-      this.mesh.position.y + (0.5 - vy / H) * height,
-      this.mesh.position.z + 0.08,
-    );
+    return { u: clamp(x / W, 0, 1), v: clamp(vy / H, 0, 1) };
   }
+
 
   /* ---------------- layout engine ---------------- */
 
