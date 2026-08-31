@@ -492,6 +492,58 @@ function diagramIntrinsicSize(
       w = 540;
       h = 440;
       break;
+    case "plant":
+      w = 480;
+      h = 460;
+      break;
+    case "heart":
+      w = 470;
+      h = 450;
+      break;
+    case "dna":
+      w = 400;
+      h = 470;
+      break;
+    case "cell":
+      w = 500;
+      h = 440;
+      break;
+    case "pyramid":
+      w = 520;
+      h = 440;
+      break;
+    case "molecule":
+      w = 500;
+      h = 400;
+      break;
+    case "lab":
+      w = 500;
+      h = 430;
+      break;
+    case "earth":
+      w = 470;
+      h = 450;
+      break;
+    case "sun":
+      w = 450;
+      h = 450;
+      break;
+    case "circuit":
+      w = 560;
+      h = 400;
+      break;
+    case "forces":
+      w = 560;
+      h = 400;
+      break;
+    case "solid":
+      w = 470;
+      h = 430;
+      break;
+    case "number-line":
+      w = 620;
+      h = 240;
+      break;
     default: {
       // generic: label columns must fit INSIDE the box (long/Hindi labels measured)
       const maxRows = Math.max(1, Math.floor(280 / 48));
@@ -1717,6 +1769,372 @@ function drawDiagram(
       c.fill();
       label("CO₂ + H₂O", 40, 330, 0.55);
       label("→ Glucose + O₂", 250, 400, 0.85);
+      break;
+    }
+    case "plant": {
+      // soil, stem, leaves, flower — labelled parts of a plant
+      c.strokeStyle = ink(INK.ink2);
+      c.beginPath();
+      c.moveTo(0, 400);
+      c.lineTo(420, 400);
+      c.stroke();
+      c.strokeStyle = ink(INK.good);
+      c.lineWidth = 8;
+      c.beginPath();
+      c.moveTo(200, 400);
+      c.lineTo(200, 400 - 250 * reveal);
+      c.stroke();
+      // roots
+      c.strokeStyle = ink(INK.ink2);
+      c.lineWidth = 4;
+      for (const dx of [-70, -30, 30, 70]) {
+        c.beginPath();
+        c.moveTo(200, 400);
+        c.lineTo(200 + dx * reveal, 400 + 70 * reveal);
+        c.stroke();
+      }
+      // leaves
+      c.fillStyle = ink(INK.good);
+      for (const [dx, dy, rot] of [
+        [-1, 90, -0.7],
+        [1, 140, 0.7],
+      ] as Array<[number, number, number]>) {
+        c.save();
+        c.translate(200 + dx * 60, 400 - dy);
+        c.rotate(rot);
+        c.beginPath();
+        c.ellipse(dx * 40 * reveal, 0, 62 * reveal, 26 * reveal, 0, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
+      // flower
+      c.fillStyle = ink(INK.hl);
+      c.beginPath();
+      c.arc(200, 400 - 250 * reveal, 30 * reveal, 0, Math.PI * 2);
+      c.fill();
+      label(labels[0] ?? "Flower", 250, 150, 0.6);
+      label(labels[1] ?? "Leaf", 290, 270, 0.72);
+      label(labels[2] ?? "Stem", 220, 340, 0.84);
+      label(labels[3] ?? "Root", 250, 450, 0.94);
+      break;
+    }
+    case "heart": {
+      // two-lobe heart outline with chamber divider and flow arrows
+      c.lineWidth = 6;
+      c.strokeStyle = ink(INK.warn);
+      c.beginPath();
+      c.moveTo(200, 380 * reveal + 40);
+      c.bezierCurveTo(20, 240, 40, 60, 130, 60);
+      c.bezierCurveTo(175, 60, 195, 100, 200, 130);
+      c.bezierCurveTo(205, 100, 225, 60, 270, 60);
+      c.bezierCurveTo(360, 60, 380, 240, 200, 380 * reveal + 40);
+      c.stroke();
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 4;
+      c.beginPath();
+      c.moveTo(200, 130);
+      c.lineTo(200, 320 * reveal);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(60, 200);
+      c.lineTo(60, 320 * reveal);
+      c.stroke();
+      label(labels[0] ?? "Right atrium", 20, 120, 0.5);
+      label(labels[1] ?? "Left atrium", 250, 120, 0.62);
+      label(labels[2] ?? "Right ventricle", 0, 300, 0.76);
+      label(labels[3] ?? "Left ventricle", 250, 300, 0.9);
+      break;
+    }
+    case "dna": {
+      // double helix: two sine strands with base-pair rungs
+      const H = 380;
+      const steps = 48;
+      c.lineWidth = 6;
+      for (const phase of [0, Math.PI]) {
+        c.strokeStyle = phase === 0 ? ink(INK.cool) : ink(INK.hl);
+        c.beginPath();
+        for (let i = 0; i <= steps * reveal; i++) {
+          const t = i / steps;
+          const y = t * H;
+          const x = 150 + Math.sin(t * Math.PI * 3 + phase) * 90;
+          if (i === 0) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.stroke();
+      }
+      c.strokeStyle = ink(INK.ink2);
+      c.lineWidth = 3;
+      for (let i = 2; i <= steps * reveal; i += 4) {
+        const t = i / steps;
+        const y = t * H;
+        c.beginPath();
+        c.moveTo(150 + Math.sin(t * Math.PI * 3) * 90, y);
+        c.lineTo(150 + Math.sin(t * Math.PI * 3 + Math.PI) * 90, y);
+        c.stroke();
+      }
+      label(labels[0] ?? "Sugar–phosphate backbone", 0, H + 40, 0.7);
+      label(labels[1] ?? "Base pair", 0, H + 80, 0.9);
+      break;
+    }
+    case "cell": {
+      c.lineWidth = 6;
+      c.strokeStyle = ink(INK.cool);
+      c.beginPath();
+      c.ellipse(220, 200, 200 * reveal, 150 * reveal, 0, 0, Math.PI * 2);
+      c.stroke();
+      c.fillStyle = ink(INK.hl);
+      c.beginPath();
+      c.arc(220, 200, 50 * reveal, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = ink(INK.good);
+      c.lineWidth = 4;
+      for (const [x, y] of [
+        [130, 140],
+        [310, 250],
+        [300, 130],
+      ] as Array<[number, number]>) {
+        c.beginPath();
+        c.ellipse(x, y, 30 * reveal, 14 * reveal, 0.4, 0, Math.PI * 2);
+        c.stroke();
+      }
+      label(labels[0] ?? "Cell membrane", 0, 400, 0.55);
+      label(labels[1] ?? "Nucleus", 190, 380, 0.72);
+      label(labels[2] ?? "Cytoplasm", 300, 400, 0.9);
+      break;
+    }
+    case "pyramid": {
+      const rows = labels.length ? labels : ["Producers", "Herbivores", "Carnivores"];
+      const H = 360;
+      const rowH = H / rows.length;
+      rows.forEach((l, i) => {
+        const at = (i + 0.8) / rows.length;
+        if (reveal < i / rows.length) return;
+        const topW = 420 * (1 - (i + 1) / rows.length) + 60;
+        const botW = 420 * (1 - i / rows.length) + 60;
+        const yTop = H - (i + 1) * rowH;
+        const yBot = H - i * rowH;
+        c.strokeStyle = ink(i % 2 ? INK.hl : INK.cool);
+        c.beginPath();
+        c.moveTo(240 - topW / 2, yTop);
+        c.lineTo(240 + topW / 2, yTop);
+        c.lineTo(240 + botW / 2, yBot);
+        c.lineTo(240 - botW / 2, yBot);
+        c.closePath();
+        c.stroke();
+        label(l, 240 + botW / 2 + 14, yBot - rowH / 3, at);
+      });
+      break;
+    }
+    case "molecule": {
+      const atoms: Array<[number, number, string]> = [
+        [200, 180, labels[0] ?? "O"],
+        [70, 280, labels[1] ?? "H"],
+        [330, 280, labels[2] ?? "H"],
+      ];
+      c.strokeStyle = ink(INK.ink2);
+      c.lineWidth = 6;
+      for (let i = 1; i < atoms.length; i++) {
+        const a = atoms[0]!;
+        const b = atoms[i]!;
+        c.beginPath();
+        c.moveTo(a[0], a[1]);
+        c.lineTo(a[0] + (b[0] - a[0]) * reveal, a[1] + (b[1] - a[1]) * reveal);
+        c.stroke();
+      }
+      atoms.forEach((a, i) => {
+        c.fillStyle = ink(i === 0 ? INK.cool : INK.hl);
+        c.beginPath();
+        c.arc(a[0], a[1], (i === 0 ? 46 : 34) * reveal, 0, Math.PI * 2);
+        c.fill();
+        label(a[2], a[0] - 10, a[1] + 80, (i + 0.8) / atoms.length);
+      });
+      break;
+    }
+    case "lab": {
+      // beaker with liquid + stand
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      c.beginPath();
+      c.moveTo(120, 80);
+      c.lineTo(150, 240);
+      c.lineTo(150, 340);
+      c.lineTo(290, 340);
+      c.lineTo(290, 240);
+      c.lineTo(320, 80);
+      c.stroke();
+      c.fillStyle = ink(INK.good);
+      const lh = 120 * reveal;
+      c.fillRect(152, 340 - lh, 136, lh);
+      c.strokeStyle = ink(INK.ink2);
+      c.lineWidth = 4;
+      c.beginPath();
+      c.moveTo(80, 360);
+      c.lineTo(360, 360);
+      c.stroke();
+      label(labels[0] ?? "Flask", 340, 160, 0.55);
+      label(labels[1] ?? "Solution", 340, 300, 0.8);
+      break;
+    }
+    case "earth": {
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      c.beginPath();
+      c.arc(200, 210, 170 * reveal, 0, Math.PI * 2);
+      c.stroke();
+      c.strokeStyle = ink(INK.good);
+      c.lineWidth = 4;
+      for (const ry of [60, 120]) {
+        c.beginPath();
+        c.ellipse(200, 210, 170 * reveal, ry * reveal, 0, 0, Math.PI * 2);
+        c.stroke();
+      }
+      c.beginPath();
+      c.moveTo(200, 20);
+      c.lineTo(200, 400);
+      c.stroke();
+      label(labels[0] ?? "Equator", 380, 215, 0.7);
+      label(labels[1] ?? "Axis", 210, 20, 0.88);
+      break;
+    }
+    case "sun": {
+      c.fillStyle = ink(INK.hl);
+      c.beginPath();
+      c.arc(210, 210, 110 * reveal, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = ink(INK.hl);
+      c.lineWidth = 6;
+      const rays = 12;
+      for (let i = 0; i < rays * reveal; i++) {
+        const a = (i / rays) * Math.PI * 2;
+        c.beginPath();
+        c.moveTo(210 + Math.cos(a) * 125, 210 + Math.sin(a) * 125);
+        c.lineTo(210 + Math.cos(a) * 185, 210 + Math.sin(a) * 185);
+        c.stroke();
+      }
+      label(labels[0] ?? "Light + heat energy", 0, 420, 0.85);
+      break;
+    }
+    case "circuit": {
+      // battery — switch — bulb loop
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      const pts: Array<[number, number]> = [
+        [40, 80],
+        [460, 80],
+        [460, 300],
+        [40, 300],
+        [40, 80],
+      ];
+      c.beginPath();
+      c.moveTo(pts[0]![0], pts[0]![1]);
+      const total = pts.length - 1;
+      for (let i = 1; i <= total; i++) {
+        const seg = Math.min(1, Math.max(0, reveal * total - (i - 1)));
+        const a = pts[i - 1]!;
+        const b = pts[i]!;
+        c.lineTo(a[0] + (b[0] - a[0]) * seg, a[1] + (b[1] - a[1]) * seg);
+        if (seg < 1) break;
+      }
+      c.stroke();
+      // battery
+      c.lineWidth = 8;
+      c.strokeStyle = ink(INK.ink2);
+      c.beginPath();
+      c.moveTo(200, 60);
+      c.lineTo(200, 100);
+      c.moveTo(230, 45);
+      c.lineTo(230, 115);
+      c.stroke();
+      // bulb
+      c.strokeStyle = ink(INK.hl);
+      c.lineWidth = 6;
+      c.beginPath();
+      c.arc(460, 190, 40 * reveal, 0, Math.PI * 2);
+      c.stroke();
+      label(labels[0] ?? "Cell", 180, 30, 0.5);
+      label(labels[1] ?? "Bulb", 500, 190, 0.72);
+      label(labels[2] ?? "Switch", 180, 350, 0.9);
+      break;
+    }
+    case "forces": {
+      // block with force arrows
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      c.strokeRect(200, 150, 140 * reveal, 110 * reveal);
+      const arrow = (
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        colour: string,
+        at: number,
+      ) => {
+        if (reveal < at) return;
+        c.strokeStyle = colour;
+        c.fillStyle = colour;
+        c.lineWidth = 6;
+        c.beginPath();
+        c.moveTo(x1, y1);
+        c.lineTo(x2, y2);
+        c.stroke();
+        const a = Math.atan2(y2 - y1, x2 - x1);
+        c.beginPath();
+        c.moveTo(x2, y2);
+        c.lineTo(x2 - Math.cos(a - 0.4) * 22, y2 - Math.sin(a - 0.4) * 22);
+        c.lineTo(x2 - Math.cos(a + 0.4) * 22, y2 - Math.sin(a + 0.4) * 22);
+        c.closePath();
+        c.fill();
+      };
+      arrow(340, 205, 500, 205, ink(INK.good), 0.35);
+      arrow(200, 205, 60, 205, ink(INK.warn), 0.55);
+      arrow(270, 150, 270, 30, ink(INK.cool), 0.72);
+      arrow(270, 260, 270, 370, ink(INK.hl), 0.88);
+      label(labels[0] ?? "Applied force", 380, 180, 0.45);
+      label(labels[1] ?? "Friction", 40, 180, 0.62);
+      label(labels[2] ?? "Normal", 285, 30, 0.8);
+      label(labels[3] ?? "Weight", 285, 370, 0.95);
+      break;
+    }
+    case "solid": {
+      // cuboid in simple isometric projection
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      const w0 = 240 * reveal;
+      const h0 = 170 * reveal;
+      const d0 = 80 * reveal;
+      c.strokeRect(40, 140, w0, h0);
+      c.beginPath();
+      c.moveTo(40, 140);
+      c.lineTo(40 + d0, 140 - d0);
+      c.lineTo(40 + w0 + d0, 140 - d0);
+      c.lineTo(40 + w0, 140);
+      c.moveTo(40 + w0 + d0, 140 - d0);
+      c.lineTo(40 + w0 + d0, 140 + h0 - d0);
+      c.lineTo(40 + w0, 140 + h0);
+      c.stroke();
+      label(labels[0] ?? "length", 120, 350, 0.6);
+      label(labels[1] ?? "breadth", 300, 110, 0.78);
+      label(labels[2] ?? "height", 0, 240, 0.92);
+      break;
+    }
+    case "number-line": {
+      const ticks = Math.max(2, labels.length || 11);
+      const W = 560;
+      c.strokeStyle = ink(INK.cool);
+      c.lineWidth = 6;
+      c.beginPath();
+      c.moveTo(0, 100);
+      c.lineTo(W * reveal, 100);
+      c.stroke();
+      for (let i = 0; i < ticks; i++) {
+        const x = (i / (ticks - 1)) * W;
+        if (x > W * reveal) break;
+        c.beginPath();
+        c.moveTo(x, 80);
+        c.lineTo(x, 120);
+        c.stroke();
+        label(labels[i] ?? String(i - Math.floor((ticks - 1) / 2)), x - 10, 160, (i + 0.6) / ticks);
+      }
       break;
     }
     default: {

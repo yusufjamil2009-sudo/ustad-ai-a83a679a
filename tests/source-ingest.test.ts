@@ -8,11 +8,6 @@ import {
 } from "../src/lib/teaching/source";
 import { TeachingOrchestrator, planTeaching } from "../src/lib/teaching/orchestrator";
 import { canTransition } from "../src/lib/teaching/lifecycle";
-import {
-  buildFieldTripPlan,
-  selectFieldTrip,
-  validateVisualAtRuntime,
-} from "../src/lib/teaching/field-trip";
 import { adaptiveSay, classifyTeachingSignal, shouldAdapt } from "../src/lib/teaching/signals";
 
 const CHAPTER = `
@@ -73,21 +68,6 @@ test("paused lifecycle can enter quiz, revision and homework", () => {
   assert.equal(canTransition("paused", "quiz"), true);
   assert.equal(canTransition("paused", "revision"), true);
   assert.equal(canTransition("paused", "homework"), true);
-});
-
-test("nextFieldTripPoi advances to the NEXT diagram, not the first", () => {
-  const orch = new TeachingOrchestrator();
-  const scene = selectFieldTrip("Taj Mahal");
-  const plan = buildFieldTripPlan(scene, "english");
-  const diagrams = plan.steps
-    .map((s, i) => ({ i, phase: s.phase, label: s.label }))
-    .filter((s) => s.phase === "diagram");
-  assert.ok(diagrams.length >= 2);
-  assert.equal(validateVisualAtRuntime(scene, false), "procedural_model");
-  assert.equal(validateVisualAtRuntime(selectFieldTrip("Kabir dohe"), false), "board_only");
-  orch.startFieldTrip("Taj Mahal", "english", false);
-  assert.equal(orch.getTeachingState().teachingMode, "virtual_field_trip");
-  assert.equal(orch.can("exit_field_trip"), true);
 });
 
 test("teaching signals still drive adaptive copy by concept, not raw sentence", () => {

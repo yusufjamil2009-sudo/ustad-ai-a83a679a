@@ -11,7 +11,6 @@ import {
   VolumeX,
   Sparkles,
   Gauge,
-  Glasses,
   Wand2,
   Mic,
   MicOff,
@@ -20,6 +19,7 @@ import {
   Focus,
   Presentation,
   Box,
+  PaintBucket,
   Plus,
   Minus,
   FastForward,
@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import type { ClassroomEngine } from "@/lib/classroom2d/engine";
 import type { ClassroomState } from "@/lib/classroom2d/state";
 import type { QualityTier } from "@/lib/classroom2d/types";
+import type { BoardTheme } from "@/lib/classroom2d/board";
 import type { LessonLang } from "@/lib/classroom2d/lesson";
 import { useSettings } from "@/lib/settings-store";
 import { TeachingOrchestrator } from "@/lib/teaching/orchestrator";
@@ -43,16 +44,16 @@ import { useGuest } from "@/lib/ustad-client";
 export const Route = createFileRoute("/classroom")({
   head: () => ({
     meta: [
-      { title: "3D Classroom — Live Interactive Lessons | USTAD AI" },
+      { title: "2D Classroom — Live Interactive Lessons | USTAD AI" },
       {
         name: "description",
         content:
-          "A real-time 3D classroom: an AI teacher writes on the board, walks, points and explains any topic with one clean teaching camera.",
+          "A real-time 2D classroom: an AI teacher writes on the board, points and explains any topic with synced voice and handwriting.",
       },
-      { property: "og:title", content: "3D Classroom — USTAD AI" },
+      { property: "og:title", content: "2D Classroom — USTAD AI" },
       {
         property: "og:description",
-        content: "Live 3D teaching environment with board, teacher and physics.",
+        content: "Live 2D teaching environment with a writing board and animated teacher.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -64,7 +65,6 @@ export const Route = createFileRoute("/classroom")({
 const QUALITIES: QualityTier[] = ["low", "medium", "high"];
 
 function ClassroomPage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ClassroomEngine | null>(null);
   const orchRef = useRef<TeachingOrchestrator | null>(null);
@@ -91,9 +91,8 @@ function ClassroomPage() {
         import("@/lib/classroom2d/engine"),
         import("@/lib/classroom-handoff"),
       ]);
-      const canvas = canvasRef.current;
       const wrap = wrapRef.current;
-      if (!canvas || !wrap || disposed) return;
+      if (!wrap || disposed) return;
       engine = new Engine();
       engineRef.current = engine;
       const orch = new TeachingOrchestrator();
@@ -101,7 +100,7 @@ function ClassroomPage() {
       orch.attach(engine);
       engine.state.bus.on("state", (s) => setState({ ...s }));
       try {
-        await engine.init(canvas, wrap);
+        await engine.init(wrap);
         if (disposed) return;
         engine.setLanguage(langRef.current);
         const handoff = takeClassroomHandoff();
@@ -111,7 +110,6 @@ function ClassroomPage() {
             topic: handoff.topic,
             language: langRef.current,
             autoplay: handoff.autoplay !== false,
-            ...(handoff.fieldTrip ? { fieldTrip: true } : {}),
             ...(handoff.content ? { content: handoff.content } : {}),
             ...(handoff.studentLevel ? { studentLevel: handoff.studentLevel } : {}),
             ...(handoff.sourceType
@@ -218,13 +216,12 @@ function ClassroomPage() {
 
   const playing = state?.playing ?? false;
   const life = state?.lifecycle ?? "idle";
-  const inTrip = state?.teachingMode === "virtual_field_trip";
 
   return (
     <AppShell>
       <PageHeader
-        title="3D Classroom"
-        subtitle="Live 3D teaching environment — real board writing and teacher animation."
+        title="2D Classroom"
+        subtitle="Live 2D teaching environment — real board writing and teacher animation."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -236,17 +233,6 @@ function ClassroomPage() {
             />
             <Button onClick={startLesson}>
               <Wand2 className="size-4" /> Teach this
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={life === "doubt_branch" || life === "error"}
-              onClick={() =>
-                withOrch((o) => {
-                  o.startFieldTrip(topic, langRef.current, true);
-                })
-              }
-            >
-              Field trip
             </Button>
           </div>
         }
@@ -260,7 +246,6 @@ function ClassroomPage() {
               ref={wrapRef}
               className="panel relative h-[52vh] min-h-[320px] overflow-hidden md:h-[62vh]"
             >
-              <canvas ref={canvasRef} className="size-full" />
               {booting ? (
                 <div className="absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
                   <span className="flex items-center gap-2">
@@ -296,7 +281,6 @@ function ClassroomPage() {
                 <div className="rounded-lg bg-background/70 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur">
                   {state?.fps ?? 0} fps · {state?.quality ?? "…"} ·{" "}
                   {state?.portrait ? "9:16" : "16:9"}
-                  {state?.postFx ? " · fx" : ""}
                 </div>
                 <div className="flex items-center gap-1 rounded-lg bg-background/70 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur">
                   <Timer className="size-3" />
@@ -304,8 +288,8 @@ function ClassroomPage() {
                 </div>
                 {state?.doubt ? (
                   <div className="rounded-lg bg-accent/80 px-2 py-1 text-[10px] text-accent-foreground backdrop-blur">
-                    {state.answerMode === "3d"
-                      ? "Answering in 3D — live model"
+                    {state.answerMode === "diagram"
+                      ? "Answering with a board diagram…"
                       : "Answering your doubt…"}
                   </div>
                 ) : null}
@@ -326,18 +310,6 @@ function ClassroomPage() {
                     {state.error}
                   </div>
                 ) : null}
-                {state?.teachingMode === "virtual_field_trip" ? (
-                  <div className="rounded-lg bg-accent/80 px-2 py-1 text-[10px] text-accent-foreground backdrop-blur">
-                    Field trip
-                    {state.fieldTripPoi ? ` · ${state.fieldTripPoi}` : ""}
-                    {state.fieldTripVisual === "real_mesh" || state.fieldTripStatus === "ready"
-                      ? " · verified mesh"
-                      : state.fieldTripVisual === "procedural_model" ||
-                          state.fieldTripStatus === "partially_ready"
-                        ? " · procedural 3D model"
-                        : " · board only"}
-                  </div>
-                ) : null}
               </div>
 
               <div className="absolute top-3 left-3 flex gap-1">
@@ -352,9 +324,9 @@ function ClassroomPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => withEngine((e) => e.resetTeachingView())}
+                  onClick={() => withEngine((e) => e.clearFocus())}
                   aria-label="Reset teaching view"
-                  title="Reset teaching view (R)"
+                  title="Reset teaching view"
                 >
                   <RotateCcw className="size-4" />
                 </Button>
@@ -408,11 +380,6 @@ function ClassroomPage() {
               >
                 {state?.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
               </Button>
-              {state?.xrSupported ? (
-                <Button variant="secondary" onClick={() => withEngine((e) => void e.enterXR())}>
-                  <Glasses className="size-4" /> VR
-                </Button>
-              ) : null}
               <Button
                 variant="secondary"
                 onClick={() => withEngine((e) => e.skipStep())}
@@ -429,24 +396,6 @@ function ClassroomPage() {
               >
                 {state?.listening ? <MicOff className="size-4" /> : <Mic className="size-4" />}
               </Button>
-              {inTrip ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => withOrch((o) => o.nextFieldTripPoi())}
-                    title="Next landmark"
-                  >
-                    Next landmark
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => withOrch((o) => o.exitFieldTrip())}
-                    title="Return to class"
-                  >
-                    Return to class
-                  </Button>
-                </>
-              ) : null}
               {state?.voiceError ? (
                 <span
                   className="max-w-[16rem] truncate text-[11px] text-destructive"
@@ -533,12 +482,12 @@ function ClassroomPage() {
                 variant="secondary"
                 onClick={() => {
                   const q = doubt.trim() || topic;
-                  void orchRef.current?.handleStudentQuestion(`Show me ${q} as a 3D model`);
+                  void orchRef.current?.handleStudentQuestion(`Draw a labelled diagram of ${q}`);
                   setDoubt("");
                 }}
-                title="Answer with a 3D diagram in the classroom"
+                title="Answer with a board diagram in the classroom"
               >
-                <Box className="size-4" /> Answer in 3D
+                <Box className="size-4" /> Draw diagram
               </Button>
             </div>
 
@@ -702,14 +651,37 @@ function ClassroomPage() {
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div>
+              <p className="mb-2 flex items-center gap-2 text-xs tracking-widest text-muted-foreground uppercase">
+                <PaintBucket className="size-3.5" /> Board
+              </p>
+              <div className="flex gap-1">
+                {(["chalkboard", "whiteboard", "blackboard"] as BoardTheme[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => withEngine((e) => e.setBoardTheme(t))}
+                    className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] capitalize ${
+                      state?.boardTheme === t
+                        ? "bg-accent text-accent-foreground"
+                        : "bg-secondary/60 text-muted-foreground"
+                    }`}
+                  >
+                    {t.replace("board", "")}
+                  </button>
+                ))}
+              </div>
               <input
-                type="checkbox"
-                checked={state?.postFx ?? true}
-                onChange={(ev) => withEngine((e) => e.setPostFx(ev.target.checked))}
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={state?.boardScroll ?? 0}
+                onChange={(ev) => withEngine((e) => e.setBoardScroll(Number(ev.target.value)))}
+                aria-label="Scroll the board"
+                className="mt-2 w-full accent-primary"
               />
-              Post-processing glow (high quality)
-            </label>
+              <p className="text-[10px] text-muted-foreground">Scroll the board notes</p>
+            </div>
 
             <Button asChild variant="secondary" className="w-full">
               <Link to="/study">
@@ -718,9 +690,8 @@ function ClassroomPage() {
             </Button>
 
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              The teaching camera is locked — swipes, pinch and scroll never move it, so the board
-              and teacher stay framed. Tap the board, teacher or objects to highlight them. Space
-              plays/pauses, ← → step, R (or the reset button) restores the teaching view.
+              The board keeps every line the teacher writes — use the board slider to scroll back
+              through earlier notes. Space plays/pauses and ← → step through the lesson.
             </p>
           </aside>
         </div>

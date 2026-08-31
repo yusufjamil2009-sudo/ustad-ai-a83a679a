@@ -2,7 +2,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Loader2, GraduationCap, BookOpen, Timer, Trophy, Boxes, FileText } from "lucide-react";
 import { setClassroomHandoff } from "@/lib/classroom-handoff";
-import { shouldRecommendFieldTrip } from "@/lib/teaching/field-trip";
 import { ingestSourceText, sourceDocumentToStudyContent } from "@/lib/teaching/source";
 
 import { toast } from "sonner";
@@ -575,7 +574,6 @@ type DocLesson = {
   pages: Array<{ page: number; chars: number; ok: boolean; detail?: string }>;
   failedPages: number[];
   quality: { ok: boolean; notes: string[] };
-  recommendFieldTrip: boolean;
   teaching: {
     title: string;
     summary: string;
@@ -644,7 +642,7 @@ function TextbookPanel({ token }: { token: string }) {
     }
   };
 
-  const teach = (fieldTrip = false) => {
+  const teach = () => {
     if (!result?.teaching) return;
     const content = {
       title: result.teaching.title,
@@ -658,12 +656,11 @@ function TextbookPanel({ token }: { token: string }) {
       topic: result.teaching.title,
       content,
       autoplay: true,
-      fieldTrip,
       sourceType: result.source.sourceType,
       sourceId: result.source.documentId,
       ...(result.source.chapter ? { chapter: result.source.chapter } : {}),
     });
-    toast.success(fieldTrip ? "Opening field trip…" : "Opening source-grounded lesson…");
+    toast.success("Opening source-grounded lesson…");
     void navigate({ to: "/classroom" });
   };
 
@@ -769,14 +766,9 @@ function TextbookPanel({ token }: { token: string }) {
                 textbook questions · {result.pages.length} pages
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => teach(false)}>
+                <Button onClick={() => teach()}>
                   <Boxes className="mr-1 size-4" /> Teach this chapter
                 </Button>
-                {result.recommendFieldTrip || shouldRecommendFieldTrip(result.teaching.title) ? (
-                  <Button variant="secondary" onClick={() => teach(true)}>
-                    Optional field trip
-                  </Button>
-                ) : null}
               </div>
               <ul className="max-h-48 overflow-y-auto text-sm">
                 {result.teaching.blocks.slice(0, 12).map((b, i) => (
