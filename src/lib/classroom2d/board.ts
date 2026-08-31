@@ -1438,20 +1438,22 @@ export class BoardEngine {
 
   private paint(): void {
     const c = this.ctx;
+    PAL = PALETTES[this.theme];
     const grad = c.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#0f2b28");
-    grad.addColorStop(1, "#0a1f1d");
+    grad.addColorStop(0, PAL.bg0);
+    grad.addColorStop(1, PAL.bg1);
     c.fillStyle = grad;
     c.fillRect(0, 0, W, H);
-    c.strokeStyle = "rgba(255,255,255,0.06)";
+    c.strokeStyle = PAL.frame;
     c.lineWidth = 6;
     c.strokeRect(24, 24, W - 48, H - 48);
-    c.fillStyle = "rgba(244,247,255,0.3)";
+    c.fillStyle = PAL.watermark;
     c.font = `600 34px ${FONT_STACK}`;
     c.textAlign = "right";
     c.fillText("USTAD AI", W - 70, 90);
     c.textAlign = "left";
     c.textBaseline = "top";
+
 
     // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
     // has scrolled out stays in the item list (never deleted) and simply is not
