@@ -30,8 +30,38 @@ export type BoardOp =
   | { op: "update"; text: string }
   | { op: "diagram"; kind: DiagramKind; title?: string; data?: number[]; labels?: string[] };
 
+/**
+ * Every diagram the 2D board can honestly draw, grouped by subject.
+ * Nothing outside this list is ever fabricated — unknown topics fall back to
+ * "generic" (a titled, labelled box) instead of an invented science figure.
+ */
 export type DiagramKind =
-  "photosynthesis" | "bar" | "line" | "cycle" | "atom" | "triangle" | "generic";
+  // biology
+  | "photosynthesis"
+  | "plant"
+  | "heart"
+  | "dna"
+  | "cell"
+  | "pyramid"
+  // chemistry
+  | "atom"
+  | "molecule"
+  | "lab"
+  // physics / earth science
+  | "earth"
+  | "sun"
+  | "circuit"
+  | "forces"
+  // maths
+  | "bar"
+  | "line"
+  | "triangle"
+  | "solid"
+  | "number-line"
+  // universal
+  | "cycle"
+  | "generic";
+
 
 /**
  * Semantic teaching phase of a beat. The board is the primary teaching surface,
