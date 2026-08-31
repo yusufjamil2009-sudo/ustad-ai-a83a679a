@@ -11,7 +11,7 @@
  * oldest non-title content instead of overwriting it. Board state is fully
  * described by the item list, so it is recoverable from timeline state.
  */
-import * as THREE from "three";
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 import {
   clusterStarts,
   drawMath,
