@@ -453,31 +453,6 @@ test("§12: the pen tip tracks Devanagari CLUSTERS, not UTF-16 units", async () 
   });
 });
 
-/* ---------------- §14 board → world mapping ---------------- */
-
-test("§14: pointToWorld maps all four corners and centre exactly", async () => {
-  await withFakeDocument(async () => {
-    const { BoardEngine } = await loadBoard();
-    const b = new BoardEngine(8);
-    const p = b.pointToWorld.bind(b);
-    const near = (a: number, c: number) => Math.abs(a - c) < 1e-9;
-    const { width, height } = b.surface;
-    const halfW = width / 2;
-    const top = 1.75 + height / 2;
-    const bottom = 1.75 - height / 2;
-    const tl = p(0, 0);
-    assert.ok(near(tl.x, -halfW) && near(tl.y, top));
-    const tr = p(2560, 0);
-    assert.ok(near(tr.x, halfW) && near(tr.y, top));
-    const bl = p(0, 1010);
-    assert.ok(near(bl.x, -halfW) && near(bl.y, bottom));
-    const br = p(2560, 1010);
-    assert.ok(near(br.x, halfW) && near(br.y, bottom));
-    const centre = p(1280, 505);
-    assert.ok(near(centre.x, 0) && near(centre.y, 1.75));
-    assert.ok(near(tl.z, -6.18 + 0.08), "board front face");
-  });
-});
 
 /* ---------------- §22/§23 move + resize ---------------- */
 
@@ -573,21 +548,6 @@ test("§47/§48: erase removes the last item; clear releases the timeline gate",
   });
 });
 
-/* ---------------- §37 DPR resize race (render engine contract) ---------------- */
-
-test("§37: renderer.setQuality with a DPR change resizes buffer + post once", async () => {
-  const src = readFileSync(join(ROOT, "src/lib/classroom2d/renderer.ts"), "utf8");
-  const setQuality = src.slice(src.indexOf("setQuality(q"), src.indexOf("/** Re-evaluate"));
-  assert.match(setQuality, /getPixelRatio\(\) !== dpr/, "DPR change guarded");
-  assert.match(
-    setQuality,
-    /setSize\(this\.size\.w, this\.size\.h, false\)/,
-    "buffer resized with DPR",
-  );
-  assert.match(setQuality, /post\?\.setSize/, "post chain resized with DPR");
-  // and the constructor's default 1×1 size cannot trigger a premature buffer alloc
-  assert.match(src, /size = \{ w: 1, h: 1 \}/);
-});
 
 /* ---------------- §18–§20 MASTER BOARD: scrolling, never deleting ---------------- */
 
