@@ -683,6 +683,96 @@ function ClassroomPage() {
               <p className="text-[10px] text-muted-foreground">Scroll the board notes</p>
             </div>
 
+            <div>
+              <p className="mb-2 flex items-center gap-2 text-xs tracking-widest text-muted-foreground uppercase">
+                <Pencil className="size-3.5" /> Draw on board
+              </p>
+              <Button
+                size="sm"
+                variant={drawOn ? "default" : "secondary"}
+                className="w-full"
+                onClick={() =>
+                  withEngine((e) => {
+                    const next = !drawOn;
+                    e.setDrawMode(next);
+                    setDrawOn(next);
+                  })
+                }
+              >
+                <Pencil className="size-3.5" /> {drawOn ? "Drawing on" : "Drawing off"}
+              </Button>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="range"
+                  min={2}
+                  max={40}
+                  step={1}
+                  value={penSize}
+                  onChange={(ev) => {
+                    const v = Number(ev.target.value);
+                    setPenSize(v);
+                    withEngine((e) => e.setPenSize(v));
+                  }}
+                  aria-label="Pen size"
+                  className="w-full accent-primary"
+                />
+                <input
+                  type="color"
+                  value={penColor}
+                  onChange={(ev) => {
+                    setPenColor(ev.target.value);
+                    withEngine((e) => e.setPenColor(ev.target.value));
+                  }}
+                  aria-label="Pen colour"
+                  className="size-8 shrink-0 rounded border border-border bg-transparent"
+                />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-1">
+                <Button size="sm" variant="secondary" onClick={() => withEngine((e) => e.undoStroke())}>
+                  <Undo2 className="size-3.5" /> Undo
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => withEngine((e) => e.clearStrokes())}>
+                  <Eraser className="size-3.5" /> Clear
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 flex items-center gap-2 text-xs tracking-widest text-muted-foreground uppercase">
+                <Download className="size-3.5" /> Save board notes
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    withEngine((e) => {
+                      void e
+                        .exportBoardPNG()
+                        .then(() => toast.success("Board image saved."))
+                        .catch((err: Error) => toast.error(err.message || "Export failed."));
+                    })
+                  }
+                >
+                  <ImageIcon className="size-3.5" /> PNG
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    withEngine((e) => {
+                      void e
+                        .exportBoardPDF()
+                        .then(() => toast.success("Board PDF saved."))
+                        .catch((err: Error) => toast.error(err.message || "Export failed."));
+                    })
+                  }
+                >
+                  <FileText className="size-3.5" /> PDF
+                </Button>
+              </div>
+            </div>
+
             <Button asChild variant="secondary" className="w-full">
               <Link to="/study">
                 <LogOut className="size-4" /> Exit classroom
