@@ -21,7 +21,7 @@ const HINGLISH_WORDS =
  * §2/§3/§46 — composition
  * ------------------------------------------------------------------ */
 
-test("landscape: board occupies the majority; teacher below it; zero overlap", () => {
+test("landscape: board occupies the majority; large teacher beside it; zero overlap", () => {
   const r = computeStageRects(1600, 900, "16:9");
   assert.equal(r.portrait, false);
   // board is the hero surface
@@ -29,8 +29,11 @@ test("landscape: board occupies the majority; teacher below it; zero overlap", (
   assert.ok(r.board.h >= r.frame.h * 0.5, "board occupies the majority of the height");
   // teacher is clearly visible (not a tiny decorative character)
   assert.ok(r.teacher.h >= r.frame.h * 0.2, "teacher strip is clearly visible");
-  // no overlap, and everything stays inside the frame
-  assert.ok(r.teacher.y >= r.board.y + r.board.h, "teacher is below the board — no overlap");
+  // no overlap: teacher sits BELOW the board (portrait) or BESIDE it (landscape
+  // left strip) — the invariant is zero overlap, never content being covered
+  const below = r.teacher.y >= r.board.y + r.board.h;
+  const beside = r.teacher.x + r.teacher.w <= r.board.x;
+  assert.ok(below || beside, "teacher and board never overlap (below or beside)");
   assert.ok(r.board.x + r.board.w <= r.frame.w, "board inside frame width");
   assert.ok(r.teacher.y + r.teacher.h <= r.frame.h, "teacher inside frame height");
 });

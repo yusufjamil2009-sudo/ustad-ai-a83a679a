@@ -1,16 +1,15 @@
 /**
  * 2D Classroom Stage — the composition layer.
  *
- * It owns the DOM layout of the classroom: a LARGE scrolling board on top and
- * a LARGE 2D teacher in a full-width teaching strip below it, with NO overlap
- * (§2/§3/§46). The teacher strip spans the whole frame width so the figure can
- * slide under any board position and its hand can reach the exact pen tip.
- *
- * Landscape (16:9): board ≈ 62% of the frame height across the full width
- * (the majority of the workspace), teacher strip ≈ 34% below it.
- * Portrait (9:16): board fills the upper/main area, the teacher sits in a
- * compact but clearly visible strip below — no content is cropped and nothing
- * overlaps.
+ * It owns the DOM layout of the classroom with a LARGE board and a LARGE 2D
+ * teacher and ZERO overlap (§2/§3/§46):
+ *  - Landscape (16:9): the teacher stands in a tall LEFT strip (≈22% width,
+ *    full frame height — a big, clearly visible figure), the board occupies
+ *    the remaining ≈76% width and ≈72% height on the RIGHT (the majority of
+ *    the workspace). Nothing overlaps.
+ *  - Portrait (9:16): the board fills the upper/main area (full width, ≈58%
+ *    height), the teacher sits in a compact-but-large centered strip below.
+ * Long lessons grow the board content and scroll inside the board viewport.
  */
 import { BOARD_H, BOARD_W } from "./board";
 import { TEACHER_H, TEACHER_W } from "./teacher2d";
@@ -29,8 +28,8 @@ const BOARD_ASPECT = BOARD_W / BOARD_H;
 /**
  * Pure composition math — no DOM. Given a resolved frame size and ratio family,
  * returns the board + teacher rects with ZERO overlap (§2/§3/§46):
- * landscape → board on top (majority), full-width teacher strip below;
- * portrait → board fills the upper/main area, compact teacher strip below.
+ * landscape → tall teacher strip on the left, majority board on the right;
+ * portrait → board fills the upper/main area, teacher strip below.
  */
 export function computeStageRects(fw: number, fh: number, ratio: RatioMode = "auto"): StageRects {
   let w = Math.max(1, fw);
@@ -50,25 +49,41 @@ export function computeStageRects(fw: number, fh: number, ratio: RatioMode = "au
   const availW = w - pad * 2;
   const availH = h - pad * 2;
 
-  const boardH = portrait ? Math.round(availH * 0.56) : Math.round(availH * 0.6);
-  const boardW = Math.min(availW, Math.round(boardH * BOARD_ASPECT * 0.96));
-  const board = {
-    x: Math.round((w - boardW) / 2),
+  if (portrait) {
+    // Board: upper/main area, full width — the majority of the frame.
+    const boardH = Math.round(availH * 0.58);
+    const boardW = availW;
+    const board = { x: pad, y: pad, w: boardW, h: boardH };
+    // Teacher: large centered strip below the board — never overlapping it.
+    const teacherH = Math.round(availH - boardH - pad * 1.6);
+    const teacherW = Math.round(Math.min(availW, teacherH * (TEACHER_W / TEACHER_H) * 1.08));
+    const teacher = {
+      x: Math.round((w - teacherW) / 2),
+      y: Math.round(board.y + board.h + pad * 0.8),
+      w: teacherW,
+      h: teacherH,
+    };
+    return { frame: { x: 0, y: 0, w, h }, board, teacher, portrait };
+  }
+
+  // Landscape: tall teacher strip on the LEFT, majority board on the RIGHT.
+  const strip = Math.round(availW * 0.22);
+  const gap = Math.round(Math.min(w, h) * 0.02);
+  const teacherW = Math.round(Math.min(strip, availH * (TEACHER_W / TEACHER_H) * 1.12));
+  const teacher = {
+    x: Math.round(pad + (strip - teacherW) / 2),
     y: pad,
-    w: boardW,
+    w: teacherW,
+    h: availH,
+  };
+  const boardW = availW - strip - gap;
+  const boardH = Math.round(availH * 0.72);
+  const board = {
+    x: Math.round(pad + strip + gap),
+    y: Math.round(pad + (availH - boardH) / 2),
+    w: Math.round(boardW),
     h: boardH,
   };
-
-  const teacherH = portrait
-    ? Math.round(Math.min(availH - boardH - pad * 2, availH * 0.4))
-    : Math.round(Math.min(availH - boardH - pad * 2, availH * 0.36));
-  const teacher = {
-    x: Math.round((w - availW) / 2),
-    y: Math.round(board.y + board.h + pad * 0.6),
-    w: availW,
-    h: teacherH,
-  };
-
   return { frame: { x: 0, y: 0, w, h }, board, teacher, portrait };
 }
 

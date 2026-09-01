@@ -1,11 +1,12 @@
 /**
- * Lesson engine — turns any topic into a structured, step-by-step 3D lesson.
+ * Lesson engine — turns any topic into a structured, step-by-step lesson.
  *
- * Content-driven timing: no beat carries a hardcoded duration any more. Each
- * beat's length is the greater of (a) the real time its narration takes to
- * speak and (b) the real time its board writing takes to be written by hand,
- * plus a short breathing pad. Lesson length therefore emerges from teaching
- * depth — a simple topic stays short, a chapter-sized topic runs long.
+ * Content-driven timing (Bugs #8/#13/#32/#33): no beat carries a hardcoded
+ * duration anywhere — every duration is a PLANNING ESTIMATE produced by the
+ * single beat() factory (speech cost + board-writing cost + pad). The runtime
+ * (TimelineEngine + ClassroomEngine) advances on ACTUAL subsystem completion
+ * (voice lifecycle + board handwriting), so the estimate is never treated as
+ * proof that the teacher spoke or finished writing.
  */
 import { needsMathLayout } from "./mathtype";
 import { selectVisual } from "./visual-select";
@@ -35,8 +36,10 @@ function speakSeconds(text?: string): number {
 }
 
 /**
- * Beat factory — the single place a duration is ever decided. Speech and board
- * writing both have to finish, so the beat is as long as the slower of the two.
+ * Beat factory — the single place an estimated duration is ever decided
+ * (Bug #8/#13/#33). Speech and board writing both have to finish, so the
+ * estimate is the slower of the two plus a breathing pad. This number is
+ * planning metadata ONLY: the runtime waits for real completion events.
  */
 function beat(step: Omit<LessonStep, "duration">): LessonStep {
   const pad = step.object ? 1.4 : 0.7;
@@ -114,10 +117,18 @@ const PHRASES = {
   },
 };
 
-/** Detect the language of already-written lesson content. */
+/**
+ * Deterministic language detection (Bug #7): Devanagari → Hindi, then a strong
+ * Roman-Hinglish signal (≥2 distinct markers) → Hinglish, otherwise English.
+ * Never random — once a lesson language is chosen it is preserved.
+ */
+const HINGLISH_MARKERS =
+  /\b(kya|kaise|kyun|kyu|hai|hain|nahi|nahin|mujhe|mera|meri|tum|aap|karo|karna|batao|samjhao|thoda|acha|theek|kab|kahan|kitna|banao|chahiye|baje|aaj|kal|toh|wo|yeh|kyunki|sab|bahut|accha|wala|wali|hoga|hogi|tha|thi|raha|rahi|liye|jaisa|aisa|matlab|bilkul|zyada)\b/gi;
+
 export function detectLessonLang(text: string): LessonLang {
   if (DEVANAGARI.test(text)) return "hindi";
-  if (/\b(hai|kya|karo|nahi|aur|jisme|hoti|hota|liye|matlab)\b/i.test(text)) return "hinglish";
+  const markers = new Set((text.match(HINGLISH_MARKERS) ?? []).map((m) => m.toLowerCase()));
+  if (markers.size >= 2) return "hinglish";
   return "english";
 }
 
@@ -418,7 +429,7 @@ function pick(topic: string) {
  * Build a complete lesson plan for a topic. Deterministic, offline, instant.
  * Structure: greet -> title -> definition (written, then explained) -> each key
  * point written and unpacked -> equation -> diagram -> real-life example ->
- * common mistake -> 3D model -> question to class -> board recap -> close.
+ * common mistake -> labelled board diagram -> question to class -> recap -> close.
  */
 export function buildLessonPlan(topicRaw: string, langRaw?: LessonLang): LessonPlan {
   const topic = topicRaw.trim() || "Learning with USTAD AI";
@@ -503,8 +514,9 @@ export function buildLessonPlan(topicRaw: string, langRaw?: LessonLang): LessonP
     });
   }
 
-  // Diagram drawn on the board.
+  // Diagram drawn on the board (Bug #19 visualType metadata).
   push({
+    visualType: "board-diagram",
     say: t.diagram,
     teacher: "point",
     moveTo: "board",
@@ -546,8 +558,9 @@ export function buildLessonPlan(topicRaw: string, langRaw?: LessonLang): LessonP
     });
   }
 
-  // 3D model demo.
+  // Labelled board diagram of the whole idea (Bug #19 visualType metadata).
   push({
+    visualType: "object-demo",
     say: t.model,
     teacher: "explain",
     moveTo: "right",
@@ -556,6 +569,7 @@ export function buildLessonPlan(topicRaw: string, langRaw?: LessonLang): LessonP
     sfx: "pop",
   });
   push({
+    visualType: "object-demo",
     say: t.spin,
     teacher: "point",
     pointAt: "object",
@@ -607,7 +621,7 @@ function shorten(s: string, max = 42): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
-/** Study Studio lesson content shape (subset used to build a 3D lesson). */
+/** Study Studio lesson content shape (subset used to build a lesson). */
 export type StudyLessonContent = {
   title?: string;
   objectives?: string[];
@@ -618,7 +632,7 @@ export type StudyLessonContent = {
 };
 
 /**
- * Convert a Study Studio generated lesson into a live 3D classroom timeline.
+ * Convert a Study Studio generated lesson into a live classroom timeline.
  * Every section is taught the way a real teacher does it: heading written,
  * two or three key sentences written out by hand, then explained to the class
  * facing the students. Lesson length follows the amount of content.
@@ -654,8 +668,10 @@ export function buildLessonPlanFromContent(
     ...(content.sections ?? []).flatMap((s) => [s.heading, s.body]),
   ].join(" ");
   const hasMathAnywhere = isFormulaLine(allText);
-  const wantsDiagram =
-    subjectKnown || /diagram|cycle|structure|figure|graph|चित्र|आरेख|चक्र|संरचना/i.test(allText);
+  // Bug #17: a diagram is drawn for a KNOWN subject or when the content
+  // EXPLICITLY requests a visual (a visual noun plus an intent word) — the bare
+  // word "diagram" in instructional text never triggers an unrelated visual.
+  const wantsDiagram = subjectKnown || explicitVisualRequest(allText);
 
   push({
     phase: "intro",
@@ -798,6 +814,7 @@ export function buildLessonPlanFromContent(
   if (wantsDiagram) {
     push({
       phase: "diagram",
+      visualType: "board-diagram",
       say: t.diagram,
       teacher: "point",
       moveTo: "board",
@@ -819,6 +836,7 @@ export function buildLessonPlanFromContent(
     push({
       phase: "diagram",
       label: "Diagram",
+      visualType: "object-demo",
       say: t.model,
       teacher: "explain",
       moveTo: "right",
@@ -829,6 +847,7 @@ export function buildLessonPlanFromContent(
     push({
       phase: "diagram",
       label: "Diagram labels",
+      visualType: "object-demo",
       say: t.spin,
       teacher: "point",
       pointAt: "object",
@@ -896,10 +915,42 @@ export function buildLessonPlanFromContent(
   return { topic, summary: content.summary ?? objectives.join(" "), steps };
 }
 
-/** Does this line read as maths (equation, fraction, power, root, operator)? */
-function isFormulaLine(s: string): boolean {
+/**
+ * Does this line read as maths (Bug #20)? Reuses the existing math renderer
+ * (needsMathLayout) plus explicit unicode/chemistry patterns — never raw LaTeX
+ * shown to the user; the board pipeline typesets it via mathtype.ts.
+ */
+export function isFormulaLine(s: string): boolean {
   if (needsMathLayout(s)) return true;
-  return /(^|\s)[a-zA-Z\d)\]]\s*=\s*[^=]/.test(s) || /[₀-₉^]|\\frac|\\sqrt|√|∑|∫|→/.test(s);
+  // x = y / y = 2x + 1 … (an equation, not "A = name")
+  if (/(^|\s)[a-zA-Z\d)\]]\s*=\s*[^=]/.test(s)) return true;
+  // unicode math: subscripts, superscripts, operators, roots, sums, arrows
+  if (/[₀-₉²³⁴⁵⁶⁷⁸⁹⁰⁻√∑∫π×÷±≈≠≤≥°]/.test(s)) return true;
+  if (/\\frac|\\sqrt|\\int|\\sum|\\times|\\div|\\cdot|\\rightarrow|\\Rightarrow/.test(s))
+    return true;
+  // unicode fractions
+  if (/[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]/.test(s)) return true;
+  // chemical reactions / formulas: 2H2 + O2 -> 2H2O, H2SO4, CO2, C6H12O6
+  if (/[A-Z][a-z]?\d/.test(s) && /(→|->|⇒|⇌|\+|×|\s=\s)/.test(s)) return true;
+  if (
+    /(^|\s)(\d+\s*)?(?:[A-Z][a-z]?\d*){2,}(?=\s|$)/.test(s) &&
+    /\d/.test(s.replace(/^\s*\d+\s*/, ""))
+  )
+    return true;
+  return false;
+}
+
+/**
+ * Bug #17: semantic intent, not bare keywords. Requires BOTH a visual noun and
+ * an intent/context word, so "the graph shows..." style instructional text
+ * still qualifies while a stray "figure" mention does not.
+ */
+function explicitVisualRequest(text: string): boolean {
+  const noun =
+    /\b(diagram|figure|graph|chart|cycle|structure|flowchart|illustration|आरेख|चित्र|चक्र|संरचना|रेखाचित्र)\b/i;
+  const intent =
+    /\b(show|draw|visuali[sz]e|see|display|depict|explain|of|for|on|का|की|में|दिखाइए|बनाइए|समझिए)\b/i;
+  return noun.test(text) && intent.test(text);
 }
 
 /** Infer the semantic phase of a section from its own heading and body. */
@@ -916,18 +967,55 @@ function classifySection(
   return "concept";
 }
 
-/** Split prose into teachable sentences (board-line sized). */
+/**
+ * Split prose into teachable sentences WITHOUT losing content (Bug #36).
+ * Decimal points ("3.14") and common abbreviations ("e.g.", "Dr.", "etc.")
+ * are protected, short fragments merge into their previous sentence instead of
+ * being discarded, and Devanagari danda splits are honoured.
+ */
+/** PUA placeholder that survives regex/string ops and is not a control char. */
+const DOT_PLACEHOLDER = "\uE000";
+const ABBREVIATION = /\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|St|Prof|Fig|No|Vol|approx)\./gi;
 function sentences(s: string): string[] {
-  return s
-    .split(/(?<=[.!?।])\s+/)
-    .map((x) => x.trim())
-    .filter((x) => x.length > 12);
+  const protectedText = s.replace(ABBREVIATION, (m) => m.replace(".", DOT_PLACEHOLDER));
+  const parts = protectedText.split(/(?<=[.!?।])\s+/);
+  const out: string[] = [];
+  for (const part of parts) {
+    const cur = part.replaceAll(DOT_PLACEHOLDER, ".").trim();
+    if (!cur) continue;
+    const last = out[out.length - 1];
+    // merge fragments that clearly continue the previous sentence (conjunctions
+    // and short lowercase tails) — never discard answer content
+    if (
+      last &&
+      ((cur.length < 14 && !/^[A-Zअ-औ\d"'“(]/.test(cur)) ||
+        /^(and|but|or|so|then|because|while|which|that|hai|aur|phir|kya|isliye)\b/i.test(cur))
+    ) {
+      out[out.length - 1] = `${last} ${cur}`;
+    } else {
+      out.push(cur);
+    }
+  }
+  return out;
 }
 
+/**
+ * Semantic markdown → display text (Bug #37). Math syntax is NEVER destroyed:
+ * backslashes, braces, ^, _, brackets and unicode operators survive, so formula
+ * detection happens on intact math. Only genuine markdown formatting is
+ * removed (code fences, headings, links, bold/italic, list bullets).
+ */
 function stripMd(s: string): string {
   return s
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[*_`>#[\]]/g, "")
+    .replace(/```[\s\S]*?```/g, " code block. ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*\d×÷^_\\=]*?)\*/g, "$1")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -978,8 +1066,9 @@ export function classifyDoubt(question: string, topic = ""): Answer3D | null {
 }
 
 /**
- * 3D answer branch — the answer IS a labelled 3D diagram standing in the classroom:
- * the teacher spawns it, walks to it, points at each part, spins it, then puts it away.
+ * Diagram answer branch — the answer IS a labelled board diagram: the teacher
+ * draws it on the board, points at each part, labels every component, then
+ * moves back to the lesson. Timed content-driven via beat() (Bug #13).
  */
 
 /** Doubt-branch phrases per language, so an answer never switches script mid-lesson. */
@@ -1043,6 +1132,24 @@ const DOUBT: Record<
   },
 };
 
+/**
+ * Monotonic branch stamp (Bug #15/#26): time-based stamps alone can collide
+ * when two branches are created in the same millisecond — a per-session counter
+ * makes every doubt branch's ids unique, so an old branch can never hide or
+ * remove a newer branch's visual.
+ */
+let doubtStampCounter = 0;
+function newDoubtStamp(): string {
+  doubtStampCounter = (doubtStampCounter + 1) % 46656;
+  return `${Date.now().toString(36)}-${doubtStampCounter.toString(36)}`;
+}
+
+/**
+ * Diagram answer branch — content-driven timing (Bug #13): every step goes
+ * through the single beat() factory, so no hardcoded 4/5/6/7/8-second duration
+ * exists anywhere. The branch is isolated by a unique per-request stamp so an
+ * old doubt can never collide with a newer one (Bug #15/#26).
+ */
 function buildDiagram3DAnswer(
   question: string,
   topic: string,
@@ -1053,66 +1160,63 @@ function buildDiagram3DAnswer(
   const d = DOUBT[lang];
   const objectId = `doubt3d-${stamp}`;
   const base = { id: objectId, kind: answer.kind, labels: answer.labels };
+  const steps: LessonStep[] = [];
+  const push = (s: Omit<LessonStep, "id" | "duration">) =>
+    steps.push(beat({ id: `doubt-${stamp}-${steps.length + 1}`, ...s }));
 
-  return [
-    {
-      id: `doubt-${stamp}-a`,
-      duration: 5,
-      say: d.build3d,
-      teacher: "explain",
-      moveTo: "center",
-      pointAt: "students",
-      sfx: "chime",
-    },
-    {
-      id: `doubt-${stamp}-b`,
-      duration: 6,
-      say: d.model,
-      teacher: "point",
-      moveTo: "right",
-      pointAt: "object",
-      object: { ...base, action: "drop" },
-      sfx: "pop",
-    },
-    {
-      id: `doubt-${stamp}-c`,
-      duration: 8,
-      say: d.labels(answer.labels.join(", "), answer.explain),
-      teacher: "point",
-      pointAt: "object",
-      object: { ...base, action: "focus" },
-    },
-    {
-      id: `doubt-${stamp}-d`,
-      duration: 7,
-      say: d.rotate,
-      teacher: "explain",
-      pointAt: "object",
-      object: { ...base, action: "spin" },
-    },
-    {
-      id: `doubt-${stamp}-e`,
-      duration: 6,
-      say: d.keepLine,
-      teacher: "write",
-      moveTo: "board",
-      pointAt: "board",
-      board: [
-        { op: "write", text: `${d.qPrefix}: ${question}`, size: 46 },
-        { op: "highlight", text: `${d.qPrefix}: ${question}` },
-      ],
-      sfx: "chalk",
-    },
-    {
-      id: `doubt-${stamp}-f`,
-      duration: 4,
-      say: d.backTo(topic),
-      teacher: "wave",
-      moveTo: "center",
-      pointAt: "students",
-      object: { ...base, action: "hide" },
-    },
-  ];
+  push({
+    visualType: "board-diagram",
+    say: d.build3d,
+    teacher: "explain",
+    moveTo: "center",
+    pointAt: "students",
+    sfx: "chime",
+  });
+  push({
+    visualType: "object-demo",
+    say: d.model,
+    teacher: "point",
+    moveTo: "right",
+    pointAt: "object",
+    object: { ...base, action: "drop" },
+    sfx: "pop",
+  });
+  push({
+    visualType: "object-demo",
+    say: d.labels(answer.labels.join(", "), answer.explain),
+    teacher: "point",
+    pointAt: "object",
+    object: { ...base, action: "focus" },
+  });
+  push({
+    visualType: "object-demo",
+    say: d.rotate,
+    teacher: "explain",
+    pointAt: "object",
+    object: { ...base, action: "spin" },
+  });
+  push({
+    visualType: "board-diagram",
+    say: d.keepLine,
+    teacher: "write",
+    moveTo: "board",
+    pointAt: "board",
+    board: [
+      { op: "write", text: `${d.qPrefix}: ${question}`, size: 46 },
+      { op: "highlight", text: `${d.qPrefix}: ${question}` },
+    ],
+    sfx: "chalk",
+  });
+  push({
+    visualType: "object-demo",
+    say: d.backTo(topic),
+    teacher: "wave",
+    moveTo: "center",
+    pointAt: "students",
+    object: { ...base, action: "hide" },
+  });
+
+  return steps;
 }
 
 export function buildDoubtAnswer(
@@ -1124,56 +1228,70 @@ export function buildDoubtAnswer(
   const lang = langRaw ?? detectLessonLang(`${question} ${topic}`);
   const d = DOUBT[lang];
   const subject = pick(`${question} ${topic}`);
+  // Bug #16: a visual is only shown when the topic is genuinely known — an
+  // unknown topic must NOT receive an unrelated object/visual.
+  const subjectKnown = SUBJECTS.some((s) => s.match.test(`${question} ${topic}`));
   const short = shorten(q, 34);
-  const stamp = Date.now().toString(36);
+  const stamp = newDoubtStamp();
+  // Unique per-branch object id (Bug #15): every doubt branch is isolated, so
+  // an old branch can never hide/remove a newer branch's visual.
+  const objectId = `doubt-model-${stamp}`;
+  const steps: LessonStep[] = [];
+  const push = (s: Omit<LessonStep, "id" | "duration">) =>
+    steps.push(beat({ id: `doubt-${stamp}-${steps.length + 1}`, ...s }));
 
-  // Branch: when the answer is best shown in space, render it as a real 3D diagram.
+  // Branch: when the answer is best shown as a picture, draw it on the board.
   const visual = classifyDoubt(q, topic);
   if (visual) return buildDiagram3DAnswer(q, topic, visual, stamp, lang);
 
-  return [
-    {
-      id: `doubt-${stamp}-a`,
-      duration: 5,
-      say: d.intro(q),
-      teacher: "explain",
-      moveTo: "center",
-      pointAt: "students",
-      sfx: "chime",
-    },
-    {
-      id: `doubt-${stamp}-b`,
-      duration: 7,
-      say: d.shortAnswer(topic),
-      teacher: "write",
-      moveTo: "board",
-      pointAt: "board",
-      board: [
-        { op: "write", text: `${d.qPrefix}: ${short}`, size: 46 },
-        { op: "highlight", text: `${d.qPrefix}: ${short}` },
-      ],
-      sfx: "chalk",
-    },
-    {
-      id: `doubt-${stamp}-c`,
-      duration: 7,
+  push({
+    say: d.intro(q),
+    teacher: "explain",
+    moveTo: "center",
+    pointAt: "students",
+    sfx: "chime",
+  });
+  push({
+    say: d.shortAnswer(topic),
+    teacher: "write",
+    moveTo: "board",
+    pointAt: "board",
+    board: [
+      { op: "write", text: `${d.qPrefix}: ${short}`, size: 46 },
+      { op: "highlight", text: `${d.qPrefix}: ${short}` },
+    ],
+    sfx: "chalk",
+  });
+  // Object/board-diagram ONLY when the topic maps to a real visual (Bug #16).
+  if (subjectKnown) {
+    push({
+      visualType: "object-demo",
       say: d.explainModel(topic),
       teacher: "point",
       moveTo: "right",
       pointAt: "object",
-      object: { id: "doubt-model", kind: subject.object, action: "show" },
+      object: { id: objectId, kind: subject.object, action: "show" },
       board: [{ op: "arrow", from: [180, 520], to: [640, 620] }],
-    },
-    {
-      id: `doubt-${stamp}-d`,
-      duration: 4,
+    });
+    push({
+      visualType: "object-demo",
       say: d.cleared,
       teacher: "wave",
       moveTo: "center",
       pointAt: "students",
-      object: { id: "doubt-model", kind: subject.object, action: "hide" },
-    },
-  ];
+      object: { id: objectId, kind: subject.object, action: "hide" },
+    });
+  } else {
+    // Unknown topic: clean board explanation only — no fabricated visual.
+    push({
+      say: d.cleared,
+      teacher: "wave",
+      moveTo: "center",
+      pointAt: "students",
+    });
+  }
+
+  return steps;
 }
 
 /**
@@ -1195,7 +1313,7 @@ export function buildDoubtStepsFromAnswer(
   const q = question.trim().replace(/\s+/g, " ");
   const lang = langRaw ?? detectLessonLang(`${question} ${answer} ${topic}`);
   const d = DOUBT[lang];
-  const stamp = Date.now().toString(36);
+  const stamp = newDoubtStamp();
   const steps: LessonStep[] = [];
   let n = 0;
   const push = (s: Omit<LessonStep, "id" | "duration">) =>

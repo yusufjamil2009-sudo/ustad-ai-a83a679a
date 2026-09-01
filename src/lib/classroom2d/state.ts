@@ -23,6 +23,10 @@ export type ClassroomState = {
   muted: boolean;
   listening: boolean;
   error: string | null;
+  /** truthful TTS failure (Bug #2) — the beat never claims success on error */
+  speechError: string | null;
+  /** honest audio readiness (Bug #29): "ready" | "blocked" | "unavailable" */
+  voiceReady: "ready" | "blocked" | "unavailable";
   /** chrono engine readouts */
   elapsedMs: number;
   remainingMs: number;
@@ -97,6 +101,8 @@ export class StateEngine {
     muted: false,
     listening: false,
     error: null,
+    speechError: null,
+    voiceReady: "ready",
     elapsedMs: 0,
     remainingMs: 0,
     durationMs: 0,

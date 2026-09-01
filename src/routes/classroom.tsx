@@ -104,6 +104,9 @@ function ClassroomPage() {
       if (!wrap || disposed) return;
       engine = new Engine();
       engineRef.current = engine;
+      // Dev/runtime-verification handle — lets the Playwright suites assert the
+      // real audio lifecycle + timeline sync in the browser (no UI impact).
+      (window as unknown as Record<string, unknown>)["__ustadClassroom"] = engine;
       const orch = new TeachingOrchestrator();
       orchRef.current = orch;
       orch.attach(engine);

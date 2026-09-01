@@ -721,6 +721,20 @@ export class BoardEngine {
   }
 
   /**
+   * Board progress signal 0..1 (Bug #9): the average reveal of the elements
+   * currently being written. The runtime can read real handwriting progress
+   * instead of guessing from the beat estimate. 1 = nothing in progress.
+   */
+  get writingProgress(): number {
+    const revealing = this.items.filter((i) => i.reveal < 1);
+    if (!revealing.length) return 1;
+    return revealing.reduce((a, i) => a + i.reveal, 0) / revealing.length;
+  }
+
+  /** Board error signal (Bug #9 boardError): an op failed and was skipped. */
+  onOpError?: (op: BoardOp, err: unknown) => void;
+
+  /**
    * Content px → normalised VIEWPORT position (0..1, 0..1) of the live pen tip.
    * The 2D teacher uses this to place its writing hand over the board.
    */

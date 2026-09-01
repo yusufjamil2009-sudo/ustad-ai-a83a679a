@@ -158,6 +158,8 @@ export class ClassroomEngine {
     this.timeline.isBoardBusy = () => this.board.busy;
     // ...or while the authoritative voice controller still has a request in flight
     this.timeline.isSpeechPending = () => this.audio.isSpeechPending;
+    // truthful speech lifecycle — STARTING/SPEAKING wait, ENDED/SKIPPED/FAILED don't
+    this.timeline.getSpeechState = () => this.audio.lifecycleState;
 
     // voice input (student doubts)
     this.voice.onStart = () => this.state.set({ listening: true, transcript: "" });
@@ -181,18 +183,29 @@ export class ClassroomEngine {
       this.state.bus.emit("finished", { topic: plan.topic });
     };
 
-    // audio → teacher lipsync + timeline gating (token-guarded)
+    // audio → teacher lipsync + timeline gating (token-guarded, §13/§14)
     this.audio.onSpeakStart = () => {
       if (this.speakingToken !== this.narrationToken) return;
       this.teacher.setSpeaking(true);
       this.timeline.notifySpeechStart();
+      this.state.set({ error: null, speechError: null, voiceReady: this.audio.readiness });
     };
     this.audio.onSpeakEnd = () => {
       if (this.speakingToken !== this.narrationToken) return;
       this.teacher.setSpeaking(false);
       this.timeline.notifySpeechEnd();
     };
-    this.audio.onSpeechUnavailable = (reason) => this.state.set({ error: reason });
+    // interruption (pause/mute/new-beat/dispose) — never a completion (Bug #3/#23)
+    this.audio.onSpeakCancel = () => {
+      this.teacher.setSpeaking(false);
+    };
+    // provider/browser error — never a completion (Bug #2); timeline recovers
+    this.audio.onSpeechError = (reason) => {
+      this.state.set({ speechError: reason });
+    };
+    this.audio.onSpeechUnavailable = (reason) =>
+      this.state.set({ error: reason, voiceReady: "unavailable" as const });
+    this.audio.onReadinessChange = (r) => this.state.set({ voiceReady: r });
 
     // responsive stage — recompute only on a REAL pixel-size change
     const resize = () => {
@@ -371,13 +384,16 @@ export class ClassroomEngine {
     this.audio.startAmbience();
     this.timeline.play();
     this.state.set({ playing: true, needsResume: false });
-    // Resume after pause: the beat's speech was stopped by pause(), so restart
-    // this beat's narration. The timeline's speech gate keeps the beat alive
-    // until the sentence actually completes — nothing gets cut off. (A fresh
-    // play that just landed on beat 0 already started speech inside applyStep,
-    // so `isSpeechPending` guards against a double-start.)
+    /**
+     * Resume after pause (Bug #23/#24): the beat's speech was CANCELLED by
+     * pause() — never completed. Restart only the current beat's narration and
+     * ONLY when it did not already complete (a fully spoken sentence is never
+     * repeated; board writing is never duplicated — it resumes in place).
+     * A fresh play that just landed on beat 0 already started speech inside
+     * applyStep, so `isSpeechPending` guards against a double-start.
+     */
     const step = this.timeline.step;
-    if (step?.say && !this.audio.isSpeechPending) {
+    if (step?.say && !this.audio.isSpeechPending && !this.timeline.speechCompleted) {
       this.pendingSay = null;
       if (this.sayTimer !== null) {
         window.clearTimeout(this.sayTimer);
@@ -480,6 +496,9 @@ export class ClassroomEngine {
           this.board.apply(op);
         } catch (e) {
           console.warn("board op skipped (preserving existing content):", op.op, e);
+          // Board error signal — the beat still completes honestly via its
+          // remaining requirements (Bug #9 boardError path).
+          this.board.onOpError?.(op, e);
         }
       }
     }

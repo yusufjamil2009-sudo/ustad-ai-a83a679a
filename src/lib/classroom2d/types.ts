@@ -119,14 +119,20 @@ export const PHASE_LABEL: Record<LessonPhase, string> = {
   close: "Wrap up",
 };
 
-/** One semantic step of a lesson timeline. Duration is a hint, not a fixed video frame. */
+/** One semantic step of a lesson timeline. Duration is a PLANNING ESTIMATE
+ * (Bug #8/#33) — the runtime advances on real subsystem completion (voice
+ * lifecycle + board writing), never because `duration` elapsed. */
 export type LessonStep = {
   id: string;
   /** semantic teaching phase — drives the compact HUD chip and camera intent */
   phase?: LessonPhase;
   /** short board-side label shown in the UI (never the whole explanation) */
   label?: string;
-  /** seconds; timeline can extend/pause/resume dynamically */
+  /**
+   * ESTIMATED seconds (planning/progress-bar metadata only, Bug #33). The
+   * runtime never treats it as proof that speech/writing completed — real
+   * completion comes from the voice lifecycle and the board engine.
+   */
   duration: number;
   say?: string;
   camera?: CameraId;
@@ -136,6 +142,8 @@ export type LessonStep = {
   /** IK look/point target */
   pointAt?: "board" | "students" | "object" | null;
   board?: BoardOp[];
+  /** semantic visual attached to this beat (Bug #19 metadata, not a 3D engine) */
+  visualType?: "board-diagram" | "object-demo";
   /** spawn / focus a 3D object in the scene */
   object?: {
     id: string;

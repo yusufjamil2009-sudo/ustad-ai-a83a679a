@@ -36,23 +36,39 @@ try {
   if (stage.board && stage.frame) {
     const boardArea = stage.board.width * stage.board.height;
     const frameArea = stage.frame.width * stage.frame.height;
-    check("Board occupies the majority of the frame", boardArea / frameArea > 0.5, `${(boardArea / frameArea * 100).toFixed(0)}%`);
+    check(
+      "Board occupies the majority of the frame",
+      boardArea / frameArea > 0.5,
+      `${((boardArea / frameArea) * 100).toFixed(0)}%`,
+    );
   }
   if (stage.board && stage.teacher) {
     const noOverlap =
       stage.teacher.top >= stage.board.bottom - 1 || stage.teacher.right <= stage.board.left + 1;
-    check("Teacher and board do not overlap", noOverlap,
-      `teacher.top=${Math.round(stage.teacher.top)} board.bottom=${Math.round(stage.board.bottom)}`);
-    check("Teacher is clearly visible (tall strip)", stage.teacher.height >= 120, `${Math.round(stage.teacher.height)}px`);
+    check(
+      "Teacher and board do not overlap",
+      noOverlap,
+      `teacher.top=${Math.round(stage.teacher.top)} board.bottom=${Math.round(stage.board.bottom)}`,
+    );
+    check(
+      "Teacher is clearly visible (tall strip)",
+      stage.teacher.height >= 120,
+      `${Math.round(stage.teacher.height)}px`,
+    );
   }
 
   // Start a lesson (topic input → Teach this)
   const input = await page.$('input[placeholder*="topic"]');
   if (input) {
     await input.fill("Photosynthesis");
-    await page.getByRole("button", { name: "Teach this" }).click().catch(() => null);
+    await page
+      .getByRole("button", { name: "Teach this" })
+      .click()
+      .catch(() => null);
     await page.waitForTimeout(4000);
-    const phase = await page.evaluate(() => document.querySelector(".ustad-stage") ? "ok" : "none");
+    const phase = await page.evaluate(() =>
+      document.querySelector(".ustad-stage") ? "ok" : "none",
+    );
     check("Lesson started and stage alive", phase === "ok");
     const stepInfo = await page.evaluate(() => {
       const el = document.body.innerText;
@@ -70,7 +86,9 @@ try {
     if (btn) {
       await btn.click().catch(() => null);
       await page.waitForTimeout(400);
-      const active = await page.evaluate(() => document.querySelector(".ustad-stage-board") !== null);
+      const active = await page.evaluate(
+        () => document.querySelector(".ustad-stage-board") !== null,
+      );
       check(`Board theme switch: ${theme}`, active);
     }
   }
@@ -91,15 +109,11 @@ try {
       const rects = await page.evaluate(() => {
         const b = document.querySelector(".ustad-stage-board")?.getBoundingClientRect();
         const t = document.querySelector(".ustad-stage-teacher")?.getBoundingClientRect();
-        return b && t
-          ? {
-              overlap: t.top < b.bottom,
-              boardW: Math.round(b.width),
-              teacherH: Math.round(t.height),
-            }
-          : null;
+        if (!b || !t) return null;
+        const noOverlap = t.top >= b.bottom - 1 || t.right <= b.left + 1;
+        return { noOverlap, boardW: Math.round(b.width), teacherH: Math.round(t.height) };
       });
-      check(`Ratio ${mode} — no overlap`, rects ? !rects.overlap : false, JSON.stringify(rects));
+      check(`Ratio ${mode} — no overlap`, rects ? rects.noOverlap : false, JSON.stringify(rects));
     }
   }
 
@@ -107,7 +121,10 @@ try {
   const slider = await page.$('input[aria-label="Scroll the board"]');
   if (slider) {
     await slider.evaluate((el) => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      ).set;
       setter.call(el, "1");
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));

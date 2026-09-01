@@ -6,6 +6,7 @@
  */
 import { ChronoEngine, SECOND } from "./chrono";
 import type { LessonPlan, LessonStep } from "./types";
+import type { SpeechLifecycle } from "./audio";
 
 export type StepHandler = (step: LessonStep, index: number) => void;
 
@@ -36,6 +37,19 @@ export class TimelineEngine {
    * this is what stops the timeline from advancing BEFORE speech starts).
    */
   isSpeechPending: () => boolean = () => false;
+  /**
+   * Truthful speech lifecycle from the authoritative voice controller (Bug #1).
+   * The timeline distinguishes STARTING/SPEAKING (wait), ENDED (done),
+   * FAILED/UNAVAILABLE (explicit recovery), CANCELLED (interruption) and
+   * SKIPPED (policy — never waits). Defaults to "idle" for engines that do not
+   * report a lifecycle (falls back to `isSpeechPending` only).
+   */
+  getSpeechState: () => SpeechLifecycle = () => "idle";
+  /**
+   * True once a beat with narration has been entered and speech has NOT yet been
+   * satisfied — while true the beat may never advance merely on elapsed time.
+   */
+  private speechExpected = false;
 
   onStep?: StepHandler;
   onFinish?: (plan: LessonPlan) => void;
@@ -50,6 +64,7 @@ export class TimelineEngine {
     this.playing = false;
     this.speechStarted = false;
     this.speechDone = false;
+    this.speechExpected = false;
     this.branchReturn = null;
     this.branchOrigin = null;
     this.branchStepIds = new Set();
@@ -88,6 +103,11 @@ export class TimelineEngine {
 
   get inDoubtBranch(): boolean {
     return this.branchReturn !== null;
+  }
+
+  /** True when the current beat's narration completed successfully (Bug #24). */
+  get speechCompleted(): boolean {
+    return this.speechStarted && this.speechDone;
   }
 
   /* -------------- transport -------------- */
@@ -164,6 +184,7 @@ export class TimelineEngine {
     // Reset speech flags on every direct navigation (Section 24).
     this.speechStarted = false;
     this.speechDone = false;
+    this.speechExpected = Boolean(step.say);
     this.chrono.seekTo(this.offsetOf(i));
     this.onStep?.(step, i);
     this.onTick?.(i, this.steps.length, 0);
@@ -300,32 +321,54 @@ export class TimelineEngine {
       Math.min(1, this.elapsed / Math.max(0.001, effective)),
     );
     /**
-     * Speech gate. Some browsers have no usable voice and never fire a start or
-     * end event; waiting on them stalled every beat until the safety timeout and
-     * made lessons crawl. If narration never started, don't wait for it.
-     *
-     * With provider TTS the voice controller reports `isSpeechPending` while a
-     * request is in flight/playing; while pending we NEVER advance (§13/§40) —
-     * that is what stops the timeline from skipping ahead of a sentence. A hard
-     * grace (18 s) covers a hung provider request so a dead voice can never
-     * freeze the lesson forever.
+     * TRUE RUNTIME SYNCHRONIZATION (§5, Bugs #1/#8/#9/#10/#22/#27/#28/#31).
+     * A beat completes only when its REAL requirements complete:
+     *   - narration: only a genuine SpeechLifecycle "ended" (or an explicit
+     *     policy/recovery state) satisfies the speech requirement — an
+     *     estimated `effective` duration is never treated as proof that the
+     *     teacher spoke (§8/#33), and "no speech event yet" is never read as
+     *     "speech completed" (#1).
+     *   - board writing: the beat never ends while its handwriting is still
+     *     progressing (board.busy) — the board renderer is the authority (#9).
+     * Only the Master Teaching Timeline advances a phase (§31); subsystems
+     * merely report state.
      */
-    const neverSpoke = !this.speechStarted;
-    const spokeNow =
-      this.speechDone || (neverSpoke && !this.isSpeechPending() && this.elapsed > 1.2);
-    const hungVoice = neverSpoke && this.elapsed > 18;
-    const spoken = !step.say || spokeNow || hungVoice;
-    const written = !step.board?.length || !this.isBoardBusy();
+    const st = this.getSpeechState();
+    const stActive = st !== "idle"; // a real voice controller is reporting
+    const pending = this.isSpeechPending();
+
+    let speechBlocked = false;
+    if (this.speechExpected) {
+      if (stActive) {
+        // lifecycle-driven: STARTING/SPEAKING wait; ENDED/FAILED/UNAVAILABLE/
+        // SKIPPED do not; CANCELLED waits only in the tiny window before the
+        // re-speak of the resumed beat starts (never after it started).
+        speechBlocked =
+          st === "starting" || st === "speaking" || (st === "cancelled" && this.elapsed < 1.5);
+      } else {
+        // legacy/test mode (or lifecycle "idle"): the pending flag is the gate,
+        // plus a short grace so the synchronous speak() of a fresh beat lands
+        // before elapsed time alone could advance the beat.
+        speechBlocked = pending || this.elapsed < 1.5;
+      }
+    }
+    const spoken = !this.speechExpected || !speechBlocked || this.speechDone;
+    // The board is the authority (Bug #9): the beat never ends while its
+    // handwriting (including semantic visuals applied by the engine) is still
+    // progressing. When no board engine is attached this is always false-free.
+    const written = !this.isBoardBusy();
+
     if (this.elapsed >= effective && spoken && written) {
       this.speechDone = false;
       this.speechStarted = false;
+      this.speechExpected = false;
       this.next();
-    } else if (this.elapsed >= effective + 10 && written && !this.isSpeechPending()) {
-      // Safety timeout for a stuck speech engine ONLY (never while speech is
-      // still pending, and never while the board is still writing — writing is
-      // content-driven and may legitimately outlast the planned beat).
+    } else if (this.elapsed >= effective + 10 && written && !speechBlocked) {
+      // Explicit recovery for a stuck engine (Bug #27): only fires when speech
+      // is NOT actively running/pending — never while the board is writing.
       this.speechDone = false;
       this.speechStarted = false;
+      this.speechExpected = false;
       this.next();
     }
   }
@@ -336,6 +379,7 @@ export class TimelineEngine {
     this.playing = false;
     this.speechDone = false;
     this.speechStarted = false;
+    this.speechExpected = false;
     this.branchReturn = null;
     this.branchOrigin = null;
     this.branchStepIds = new Set();
@@ -384,6 +428,7 @@ export class TimelineEngine {
     this.playing = false;
     this.speechStarted = false;
     this.speechDone = false;
+    this.speechExpected = this.index >= 0 && this.steps[this.index]?.say ? true : false;
     this.branchReturn = snap.branchReturn;
     this.branchOrigin = snap.branchOrigin;
     this.branchStepIds = new Set(snap.branchStepIds);
