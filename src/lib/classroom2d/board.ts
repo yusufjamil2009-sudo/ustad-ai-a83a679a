@@ -623,6 +623,12 @@ export class BoardEngine {
   private nextId = 1;
   private nextZ = 1;
   private dirty = true;
+  /** freehand drawing state (mouse / touch / stylus) */
+  private drawMode = false;
+  private penSize = 8;
+  private penColor = "#ffffff";
+  private strokes: FreeStroke[] = [];
+  private live: FreeStroke | null = null;
   /** repaint accumulator for the 30 Hz animation cadence */
   private paintAcc = 0;
   onChalk?: () => void;
