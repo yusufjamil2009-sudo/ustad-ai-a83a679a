@@ -12,23 +12,10 @@
 import type { Language } from "../router.server";
 
 export type DiagramSubject =
-  | "biology"
-  | "physics"
-  | "chemistry"
-  | "mathematics"
-  | "geography"
-  | "computer"
-  | "general";
+  "biology" | "physics" | "chemistry" | "mathematics" | "geography" | "computer" | "general";
 
 export type VisualKind =
-  | "structure"
-  | "process"
-  | "comparison"
-  | "mechanism"
-  | "geometry"
-  | "graph"
-  | "circuit"
-  | "map";
+  "structure" | "process" | "comparison" | "mechanism" | "geometry" | "graph" | "circuit" | "map";
 
 export type EducationLevel = "primary" | "middle" | "high";
 
@@ -140,10 +127,7 @@ const LATIN_WORD = /[A-Za-z]{3,}/;
  * Language validation for the planned text (title + notes). Returns the list of
  * problems; empty means the plan matches the resolved language.
  */
-export function validatePlanLanguage(
-  language: Language,
-  texts: string[],
-): string[] {
+export function validatePlanLanguage(language: Language, texts: string[]): string[] {
   const problems: string[] = [];
   const joined = texts.join(" ").trim();
   if (!joined) return problems;
@@ -172,9 +156,9 @@ export function validatePlanLanguage(
 /** Language instruction injected into both the planner and the image prompt. */
 export function languageRule(language: Language): string {
   if (language === "hindi")
-    return "Write ALL title, headings, notes, annotations and explanations in Hindi (Devanagari). Standard scientific terms may be bilingual like \"केंद्रक (Nucleus)\". Never write an English sentence.";
+    return 'Write ALL title, headings, notes, annotations and explanations in Hindi (Devanagari). Standard scientific terms may be bilingual like "केंद्रक (Nucleus)". Never write an English sentence.';
   if (language === "hinglish")
-    return "Write ALL title, headings, notes, annotations and explanations in natural Hinglish (Roman script Hindi mixed with standard English scientific terms), e.g. \"Cell wall plant cell ko support aur shape deti hai.\". Never write a fully Hindi (Devanagari) sentence and never a fully formal English paragraph.";
+    return 'Write ALL title, headings, notes, annotations and explanations in natural Hinglish (Roman script Hindi mixed with standard English scientific terms), e.g. "Cell wall plant cell ko support aur shape deti hai.". Never write a fully Hindi (Devanagari) sentence and never a fully formal English paragraph.';
   return "Write ALL title, headings, notes, annotations and explanations in clear educational English.";
 }
 

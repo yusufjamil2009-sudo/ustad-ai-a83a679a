@@ -97,7 +97,7 @@ function applyQuery(rows, url) {
       if (va == null) return 1;
       if (vb == null) return -1;
       const cmp = typeof va === "number" ? va - vb : String(va).localeCompare(String(vb));
-      return (dir === "desc" ? -cmp : cmp);
+      return dir === "desc" ? -cmp : cmp;
     });
   }
   const limit = url.searchParams.get("limit");
@@ -124,7 +124,11 @@ const objectAccept = (req) =>
 function prefer(req) {
   return req.headers["prefer"] ?? "";
 }
-const preferHas = (req, token) => prefer(req).split(",").map((s) => s.trim()).includes(token);
+const preferHas = (req, token) =>
+  prefer(req)
+    .split(",")
+    .map((s) => s.trim())
+    .includes(token);
 
 function sendJson(res, status, body, headers = {}) {
   const buf = Buffer.from(JSON.stringify(body));
@@ -175,7 +179,10 @@ async function handleRest(req, res, pathname, url) {
         .find((s) => s.startsWith("on_conflict="))
         ?.split("=")[1];
     const onConflict = onConflictRaw
-      ? onConflictRaw.split(",").map((s) => s.trim()).filter(Boolean)
+      ? onConflictRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
       : ["id"];
     const merge = prefer(req).includes("resolution=merge-duplicates");
     const incoming = Array.isArray(body) ? body : [body];
@@ -234,6 +241,16 @@ async function handleRest(req, res, pathname, url) {
     for (const x of target) {
       const i = r.indexOf(x);
       if (i >= 0) r.splice(i, 1);
+    }
+    // Mirror the real DB: gallery_share_items.image_id → gallery_images(id)
+    // ON DELETE CASCADE. Deleting a gallery image removes its share links,
+    // so a deleted image can never stay reachable through an active share.
+    if (table === "gallery_images" && deleted.length > 0) {
+      const gone = new Set(deleted.map((x) => x.id));
+      const items = tables["gallery_share_items"] ?? [];
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (gone.has(items[i].image_id)) items.splice(i, 1);
+      }
     }
     if (objectAccept(req)) {
       if (deleted.length !== 1) return sendJson(res, 406, PGRST116);
@@ -415,7 +432,10 @@ const server = http.createServer(async (req, res) => {
   const pathname = decodeURIComponent(u.pathname);
   // CORS — the real Storage/PostgREST APIs allow cross-origin reads
   res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-headers", "authorization, apikey, content-type, prefer, accept, range");
+  res.setHeader(
+    "access-control-allow-headers",
+    "authorization, apikey, content-type, prefer, accept, range",
+  );
   res.setHeader("access-control-allow-methods", "GET, POST, PATCH, DELETE, OPTIONS");
   if (req.method === "OPTIONS") {
     res.writeHead(204);

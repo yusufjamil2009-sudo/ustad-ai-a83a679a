@@ -89,7 +89,10 @@ export function validateEnv(env: EnvLike): EnvReport {
       issues.push({ name, level: "error", message: `${name} is not set.` });
     }
   }
-  if (env["SUPABASE_URL"] && !/^https:\/\/[\w-]+\.supabase\.(co|in|net)\/?$/.test(env["SUPABASE_URL"].trim())) {
+  if (
+    env["SUPABASE_URL"] &&
+    !/^https:\/\/[\w-]+\.supabase\.(co|in|net)\/?$/.test(env["SUPABASE_URL"].trim())
+  ) {
     issues.push({
       name: "SUPABASE_URL",
       level: "warning",

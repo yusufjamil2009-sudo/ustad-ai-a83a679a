@@ -113,6 +113,7 @@ export const galleryUploadFn = createServerFn({ method: "POST" })
         size: number;
         width?: number;
         height?: number;
+        optimized?: boolean;
         dataUrl: string;
       };
     }) => d,

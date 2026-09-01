@@ -149,12 +149,7 @@ export function detectComplexity(text: string, intent: Intent): Complexity {
     /\b(compare|derive|prove|architecture|research|step by step|detail|full)\b/i.test(text)
   )
     return "complex";
-  if (
-    intent === "code" ||
-    intent === "math" ||
-    intent === "lesson" ||
-    intent === "exam"
-  )
+  if (intent === "code" || intent === "math" || intent === "lesson" || intent === "exam")
     return "complex";
   if (words < 15) return "simple";
   return "medium";

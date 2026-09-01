@@ -92,10 +92,12 @@ fresh signed URL.
 ## Verification
 
 - `npx tsc --noEmit` — clean.
-- `npx eslint` on all gallery files — clean.
-- `npm test` — **204/204** (192 existing + 12 gallery unit tests).
+- `npm run lint` (`eslint .`) — clean (0 errors; 2 pre-existing
+  react-refresh warnings in `ui/button.tsx` / `ui/toggle.tsx`).
+- `npm test` — **213/213** (192 existing + 21 gallery unit tests).
 - `npx vite build` — succeeds.
-- **Runtime suite `scripts/runtime-gallery.mjs` — 58/58 checks** against the
+- **Runtime suite `scripts/runtime-gallery.mjs` — 82/82 checks (two consecutive
+  full runs), 0 page errors** against the
   in-memory mock Supabase (`scripts/mock-supabase.mjs`), exercising the real
   production code path end-to-end in headless Chromium:
 
@@ -118,11 +120,25 @@ fresh signed URL.
   10. Invalid token → clean “Gallery not found”, no DB error exposed.
   11. Responsive: 360/375/390/412 mobile and 1366/1440/1920 desktop — no
       horizontal overflow; 2 columns mobile, 4 columns desktop.
+  12. S1–S14 hardening checks: refresh persistence; delete-many; server-decoded
+      BMP dimensions; >8 MB and corrupt/undecodable files rejected with clear
+      messages; HEIC gets an honest browser-support message (never uploaded);
+      arbitrary ftyp-branded ISO-BMFF files rejected; 13-entry ZIP CRC-verified;
+      large ZIP (2 × ~535 KB real PNGs) built through the production streaming
+      builder with CRC-verified entries and no UI freeze; fresh signed URLs on
+      every public reload; Android (Pixel 7) public page with working ZIP
+      download; public page creates **no guest session** and never calls the
+      bootstrap; **0 dangling share items** after deletes (cascade enforced);
+      oversized-selection guard returns a clear user error instead of crashing.
 
   Run (requires the dev server pointed at the mock):
   ```bash
-  node scripts/mock-supabase.mjs                       # on :8787
-  SUPABASE_URL=http://127.0.0.1:8787 APP_URL=http://localhost:8080 npm run dev
+  node scripts/mock-supabase.mjs                       # on :8787 — restart per run (in-memory DB)
+  SUPABASE_URL=http://127.0.0.1:8787 APP_URL=http://localhost:8080 \
+  USTAD_GUEST_SECRET=test-secret USTAD_KEY_ENCRYPTION_SECRET=test-secret \
+  SUPABASE_SERVICE_ROLE_KEY=test-key SUPABASE_PUBLISHABLE_KEY=test-key \
+  VITE_SUPABASE_URL=http://127.0.0.1:8787 VITE_SUPABASE_PUBLISHABLE_KEY=test-key \
+  npm run dev
   node scripts/runtime-gallery.mjs
   ```
 

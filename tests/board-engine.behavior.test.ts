@@ -453,7 +453,6 @@ test("§12: the pen tip tracks Devanagari CLUSTERS, not UTF-16 units", async () 
   });
 });
 
-
 /* ---------------- §22/§23 move + resize ---------------- */
 
 test("§22: targeted move moves ONLY the target and stays on the board", async () => {
@@ -547,7 +546,6 @@ test("§47/§48: erase removes the last item; clear releases the timeline gate",
     assert.doesNotThrow(() => b.update(1 / 60), "paint after clear");
   });
 });
-
 
 /* ---------------- §18–§20 MASTER BOARD: scrolling, never deleting ---------------- */
 

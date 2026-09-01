@@ -88,7 +88,8 @@ export function PwaInstallCard() {
                   <p>
                     One-click install is not available in this browser or context (it is unavailable
                     inside embedded previews). Open the published USTAD AI site in Chrome, Edge or
-                    Android Chrome and use <strong>Install app</strong> / <strong>Add to Home Screen</strong>.
+                    Android Chrome and use <strong>Install app</strong> /{" "}
+                    <strong>Add to Home Screen</strong>.
                   </p>
                 )}
               </div>

@@ -41,10 +41,7 @@ function beat(step: Omit<LessonStep, "duration">): LessonStep {
   return { ...step, duration: Math.round(Math.max(3, seconds) * 10) / 10 };
 }
 
-const PAD: Record<
-  LessonLang,
-  { greet: string; explain: string; recap: string; close: string }
-> = {
+const PAD: Record<LessonLang, { greet: string; explain: string; recap: string; close: string }> = {
   english: {
     greet: "Hello everyone. Today's topic is",
     explain: "Let me explain that.",

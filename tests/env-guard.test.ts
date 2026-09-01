@@ -35,14 +35,19 @@ test("format rules: length, whitespace and placeholders", () => {
 });
 
 test("low entropy secrets warn but do not block startup", () => {
-  const report = validateEnv({ ...base, USTAD_GUEST_SECRET: "abababababababababababababababababab" });
+  const report = validateEnv({
+    ...base,
+    USTAD_GUEST_SECRET: "abababababababababababababababababab",
+  });
   assert.equal(report.ok, true);
   assert.ok(report.issues.some((i) => i.level === "warning" && /entropy/.test(i.message)));
 });
 
 test("rotation slots are validated and must differ from the current value", () => {
   const same = validateEnv({ ...base, USTAD_GUEST_SECRET_PREVIOUS: STRONG_A });
-  assert.ok(same.issues.some((i) => i.name === "USTAD_GUEST_SECRET_PREVIOUS" && i.level === "warning"));
+  assert.ok(
+    same.issues.some((i) => i.name === "USTAD_GUEST_SECRET_PREVIOUS" && i.level === "warning"),
+  );
   const weak = validateEnv({ ...base, USTAD_KEY_ENCRYPTION_SECRET_PREVIOUS: "old" });
   assert.equal(weak.ok, false);
   const good = validateEnv({ ...base, USTAD_GUEST_SECRET_PREVIOUS: STRONG_B });

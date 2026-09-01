@@ -18,7 +18,9 @@ import { db, requireGuest } from "./guest.server";
 import {
   ALLOWED_GALLERY_MIME,
   MAX_GALLERY_BYTES,
+  looksLikeImage,
   newShareToken,
+  readImageDimensions,
   shareSignature,
   SHARE_TOKEN_RE,
 } from "./gallery-utils";
@@ -98,19 +100,7 @@ function decodeDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } {
   return { mime, bytes };
 }
 
-/** Magic-byte sniff so a renamed executable cannot pass as an image. */
-function looksLikeImage(bytes: Uint8Array, mime: string): boolean {
-  const head = [...bytes.subarray(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
-  if (mime === "image/png") return head.startsWith("89 50 4e 47");
-  if (mime === "image/jpeg" || mime === "image/jpg") return head.startsWith("ff d8 ff");
-  if (mime === "image/gif") return head.startsWith("47 49 46 38");
-  if (mime === "image/webp") return /^52 49 46 46/.test(head) && head.includes("57 45 42 50");
-  if (mime === "image/bmp") return head.startsWith("42 4d");
-  // HEIC/HEIF/AVIF: ftyp box based — sniff the ISO-BMFF brand
-  if (mime === "image/heic" || mime === "image/heif" || mime === "image/avif")
-    return /^(00 00 00 .. 66 74 79 70)/.test(head);
-  return true; // unknown-but-image-ish: let the client-side decode be the judge
-}
+/** Magic-byte sniff lives in gallery-utils (pure + unit-tested, Bug #2). */
 
 async function uploadBytes(
   guestId: string,
@@ -144,8 +134,11 @@ async function removeStorageObject(ref: string | null): Promise<void> {
   const path = ref.slice(STORAGE_PREFIX.length);
   try {
     await db().storage.from(STORAGE_BUCKET).remove([path]);
-  } catch {
-    /* physical delete is best-effort once the row is gone */
+  } catch (e) {
+    // Physical cleanup is best-effort AFTER the DB row is gone. Log it so a
+    // later sweep can collect the orphan; never surface it to the user and
+    // never let it fail the operation (Bug #5).
+    console.error("[ustad-gallery] storage cleanup failed, orphaned path:", path, e);
   }
 }
 
@@ -197,12 +190,15 @@ export async function uploadGalleryImage(
     size: number;
     width?: number;
     height?: number;
+    optimized?: boolean;
     dataUrl: string;
   },
 ): Promise<GalleryImage> {
   const guestId = await requireGuest(token);
 
-  // Decode and inspect the ACTUAL payload — never trust client size/mime.
+  // Decode and inspect the ACTUAL payload — never trust client size/mime
+  // (Bug #6). Byte length is checked against the decoded data, magic bytes
+  // are validated, and dimensions are decoded server-side from the bytes.
   const { mime: decodedMime, bytes } = decodeDataUrl(file.dataUrl);
   if (bytes.length > MAX_GALLERY_BYTES) {
     throw new Error("Image is too large. Maximum size is 8 MB.");
@@ -213,6 +209,22 @@ export async function uploadGalleryImage(
     throw new Error("Image content does not match its declared type.");
   if (!looksLikeImage(bytes, decodedMime)) throw new Error("File is not a valid image.");
 
+  // Prefer dimensions decoded from the actual bytes; fall back to the client
+  // values only when the format cannot be decoded server-side, and never
+  // trust absurd values.
+  const dims = readImageDimensions(bytes, decodedMime);
+  const clientW = Math.max(0, Math.round(file.width ?? 0));
+  const clientH = Math.max(0, Math.round(file.height ?? 0));
+  const width = dims?.width ?? (clientW >= 1 && clientW <= 100000 ? clientW : 0);
+  const height = dims?.height ?? (clientH >= 1 && clientH <= 100000 ? clientH : 0);
+
+  // "optimized" reflects the ACTUAL processing result, not the MIME alone
+  // (Bug #7): GIF passthrough → false; anything re-encoded → true. The
+  // browser reports its real result; the server falls back to "not gif"
+  // for older clients.
+  const optimized =
+    typeof file.optimized === "boolean" ? file.optimized : decodedMime !== "image/gif";
+
   const id = crypto.randomUUID();
   const ref = await uploadBytes(guestId, id, bytes, decodedMime);
   const row: GalleryImageRow = {
@@ -221,10 +233,10 @@ export async function uploadGalleryImage(
     storage_path: ref,
     mime: decodedMime,
     file_size: bytes.length,
-    width: Math.max(0, Math.round(file.width ?? 0)),
-    height: Math.max(0, Math.round(file.height ?? 0)),
+    width,
+    height,
     original_name: String(file.name ?? "").slice(0, 200),
-    optimized: decodedMime === "image/webp",
+    optimized,
     created_at: new Date().toISOString(),
   };
   const { error } = await db().from("gallery_images").insert(row);
@@ -236,7 +248,14 @@ export async function uploadGalleryImage(
   return toDto(row, url ?? "");
 }
 
-/** Delete ONLY the owner's selected gallery images (rows + storage + share links). */
+/**
+ * Delete ONLY the owner's selected gallery images (rows + storage + share
+ * links). DB delete is authoritative and runs FIRST: gallery_share_items
+ * rows are removed by ON DELETE CASCADE (Bug #4), so a deleted image can
+ * never remain reachable through an active share. Storage cleanup happens
+ * after the DB delete succeeded and is best-effort — failures are logged
+ * for later cleanup, never reported as success (Bug #5).
+ */
 export async function deleteGalleryImages(
   token: unknown,
   ids: string[],
@@ -252,7 +271,8 @@ export async function deleteGalleryImages(
   if (error) throw new Error(error.message);
   const owned = (data ?? []) as Array<{ id: string; storage_path: string }>;
   if (!owned.length) return { deleted: 0 };
-  for (const row of owned) await removeStorageObject(row.storage_path);
+
+  // 1) Authoritative DB delete (cascade removes share items).
   const { error: delErr } = await db()
     .from("gallery_images")
     .delete()
@@ -262,6 +282,10 @@ export async function deleteGalleryImages(
       owned.map((r) => r.id),
     );
   if (delErr) throw new Error(delErr.message);
+
+  // 2) Best-effort physical cleanup — never throws, never blocks the result.
+  for (const row of owned) await removeStorageObject(row.storage_path);
+
   return { deleted: owned.length };
 }
 
@@ -339,14 +363,22 @@ export async function createGalleryShare(
   return { url: publicShareUrl(shareToken), token: shareToken, count: ids.length };
 }
 
-/** Absolute public share URL (client-friendly; no internal ids, no secrets). */
+/**
+ * Public share URL (client-friendly; no internal ids, no secrets).
+ *
+ * Origin resolution (Bug #11): explicit `base` → APP_URL env → the browser's
+ * own origin → relative path. There is deliberately NO hardcoded production
+ * domain: the UI always renders the absolute URL from the origin the user is
+ * actually viewing, so production gets the real deployed origin, local dev
+ * gets localhost, and a relative fallback can never mint a fake link.
+ */
 export function publicShareUrl(shareToken: string, base?: string): string {
   const origin =
     base ??
-    (typeof window !== "undefined"
-      ? window.location.origin
-      : (process.env["APP_URL"] ?? "https://ustad-ai.com"));
-  return `${origin.replace(/\/+$/, "")}/gallery/share/${encodeURIComponent(shareToken)}`;
+    (typeof window !== "undefined" ? window.location.origin : process.env["APP_URL"]?.trim() || "");
+  const path = `/gallery/share/${encodeURIComponent(shareToken)}`;
+  if (!origin) return path;
+  return `${origin.replace(/\/+$/, "")}${path}`;
 }
 
 /** Owner's existing shares (so "All images URL" stays stable across refreshes). */
@@ -383,9 +415,12 @@ export type PublicGallery = {
 export async function getPublicGallery(shareToken: unknown): Promise<PublicGallery> {
   const token = String(shareToken ?? "").trim();
   if (!SHARE_TOKEN_RE.test(token)) return { found: false, title: "", images: [] };
+
+  // Read-only, minimal column projection. The public path NEVER selects
+  // guest_id, share_token, signature or storage refs into the DTO (Bug #9).
   const { data: share, error } = await db()
     .from("gallery_shares")
-    .select("*")
+    .select("id,title")
     .eq("share_token", token)
     .maybeSingle();
   if (error || !share) return { found: false, title: "", images: [] };
@@ -400,7 +435,7 @@ export async function getPublicGallery(shareToken: unknown): Promise<PublicGalle
 
   const { data: rows, error: rowsErr } = await db()
     .from("gallery_images")
-    .select("*")
+    .select("id,storage_path,mime,file_size,width,height,original_name,optimized,created_at")
     .in("id", ids);
   if (rowsErr || !rows) return { found: true, title: share.title, images: [] };
 

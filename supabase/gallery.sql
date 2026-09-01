@@ -64,6 +64,27 @@ create table if not exists public.gallery_share_items (
 );
 
 -- ---------------------------------------------------------------------
+-- GUARANTEE (Bug #4): deleting a gallery image MUST remove its share-item
+-- links (ON DELETE CASCADE), so a deleted image can never remain reachable
+-- through an active share. Idempotent for deployments where the FK was
+-- created with a different delete rule.
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.gallery_share_items'::regclass
+      and conname = 'gallery_share_items_image_id_fkey'
+      and confdeltype <> 'c'
+  ) then
+    alter table public.gallery_share_items
+      drop constraint gallery_share_items_image_id_fkey,
+      add constraint gallery_share_items_image_id_fkey
+        foreign key (image_id) references public.gallery_images (id) on delete cascade;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
 -- RLS (defense-in-depth; the server already enforces ownership).
 -- ---------------------------------------------------------------------
 alter table public.gallery_images enable row level security;

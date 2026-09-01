@@ -87,7 +87,10 @@ Rules:
 
 function parseBrief(text: string): Brief | null {
   try {
-    let s = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    let s = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/, "");
     const a = s.indexOf("{");
     const b = s.lastIndexOf("}");
     if (a < 0 || b < 0) return null;
@@ -168,11 +171,7 @@ function imagePrompt(
     .join(" ");
 }
 
-async function askPlanner(
-  guestId: string,
-  system: string,
-  extra?: string,
-): Promise<string | null> {
+async function askPlanner(guestId: string, system: string, extra?: string): Promise<string | null> {
   const avail = await usableProviders(guestId).catch(() => []);
   const pick = avail[0] ?? coreProvider();
   if (!pick) return null;
@@ -226,11 +225,7 @@ async function buildBrief(
 
 async function studentLevel(guestId: string): Promise<EducationLevel> {
   try {
-    const { data } = await db()
-      .from("profiles")
-      .select("*")
-      .eq("guest_id", guestId)
-      .maybeSingle();
+    const { data } = await db().from("profiles").select("*").eq("guest_id", guestId).maybeSingle();
     return detectLevel(data as Record<string, unknown> | null);
   } catch {
     return "middle";
@@ -256,10 +251,7 @@ export async function generateDiagramImage(
   const available = await usableProviders(guestId).catch(() => []);
   let image;
   try {
-    ({ image } = await generateImage(
-      available,
-      imagePrompt(brief, resolved, kind, level, false),
-    ));
+    ({ image } = await generateImage(available, imagePrompt(brief, resolved, kind, level, false)));
   } catch (e) {
     // One repair attempt with a stricter composition prompt before giving up.
     ({ image } = await generateImage(

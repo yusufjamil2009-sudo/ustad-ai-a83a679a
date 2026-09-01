@@ -32,6 +32,7 @@ import {
   optimizeImageFile,
   blobToDataUrl,
   downloadBlob,
+  fetchImageBlob,
   shareGalleryUrl,
   copyText,
   buildZip,
@@ -106,6 +107,9 @@ export function GallerySection() {
                 size: opt.blob.size,
                 width: opt.width,
                 height: opt.height,
+                // The ACTUAL processing result (Bug #7): false for GIF
+                // passthrough, true for anything re-encoded.
+                optimized: opt.optimized,
                 dataUrl,
               },
             },
@@ -147,7 +151,12 @@ export function GallerySection() {
       const res = (await galleryCreateShareFn({
         data: ids.length ? { token: "", imageIds: ids } : { token: "" },
       })) as unknown as GalleryShareResult;
-      setShareModal({ url: res.url, count: res.count });
+      // Always present the absolute URL built from the origin the user is
+      // actually viewing — never a hardcoded/fake domain (Bug #11).
+      const absolute = res.url.startsWith("http")
+        ? res.url
+        : `${window.location.origin}${res.url.startsWith("/") ? "" : "/"}${res.url}`;
+      setShareModal({ url: absolute, count: res.count });
     } catch (e) {
       toast.error((e as Error).message || "Could not generate the share URL.");
     } finally {
@@ -180,15 +189,14 @@ export function GallerySection() {
     setBusy(true);
     try {
       if (chosen.length === 1) {
-        const res = await fetch(chosen[0]!.url);
-        const blob = await res.blob();
+        // Real HTTP validation (Bug #14): non-2xx / non-image responses fail.
+        const blob = await fetchImageBlob(chosen[0]!.url);
         downloadBlob(blob, chosen[0]!.originalName || "image");
         toast.success("Image downloaded.");
       } else {
         const files = [];
         for (const img of chosen) {
-          const res = await fetch(img.url);
-          const blob = await res.blob();
+          const blob = await fetchImageBlob(img.url);
           files.push({ name: img.originalName || `${img.id}.${extOf(img.mime)}`, blob });
         }
         const zip = await buildZip(files);
@@ -508,10 +516,15 @@ function GalleryShareModal({
             size="sm"
             variant="secondary"
             onClick={async () => {
-              await copyText(url);
-              setCopied(true);
-              toast.success("Link copied.");
-              window.setTimeout(() => setCopied(false), 2000);
+              // Only claim "Link copied" when the copy truly succeeded (Bug #16).
+              const ok = await copyText(url);
+              if (ok) {
+                setCopied(true);
+                toast.success("Link copied.");
+                window.setTimeout(() => setCopied(false), 2000);
+              } else {
+                toast.error("Could not copy the link. Copy it manually from the field above.");
+              }
             }}
           >
             {copied ? <Check className="mr-1 size-3.5" /> : <Link2 className="mr-1 size-3.5" />}
@@ -522,8 +535,12 @@ function GalleryShareModal({
           <Button
             className="flex-1"
             onClick={async () => {
+              // User-cancel of the native share sheet stays silent (Bug #15);
+              // clipboard fallback only on a real share failure; honest errors.
               const how = await shareGalleryUrl(url, "USTAD Gallery");
               if (how === "copied") toast.success("Link copied.");
+              else if (how === "failed")
+                toast.error("Could not share or copy the link. Try Copy Link instead.");
             }}
           >
             <Share2 className="mr-1 size-4" /> Share

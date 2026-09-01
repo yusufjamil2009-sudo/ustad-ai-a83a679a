@@ -7,10 +7,22 @@
  * CSS/blur/sharpen fakery: the stored asset is the genuinely optimized image.
  * Small images pass through at their original resolution (never upscaled).
  * Animated GIFs are kept as-is so animation is never lost.
+ *
+ * ZIP downloads (Bug #1): entries are streamed (blob.stream().tee()) so the
+ * original bytes are never materialised into a second full copy, compressed
+ * parts are appended as Blob parts without a final giant concatenation, and
+ * hard size/count limits produce a clear error instead of freezing the
+ * browser. Entry names are sanitised (Bug #8) so a hostile filename can never
+ * write outside the archive on extraction.
  */
+import { sanitizeZipEntryName, MAX_GALLERY_BYTES } from "./gallery-utils";
 
 export const GALLERY_MAX_DIM = 2048; // longest side; larger images are scaled down
 const WEBP_QUALITY = 0.85;
+
+/** Hard limits that keep ZIP building memory-safe (Bug #1). */
+export const MAX_ZIP_ENTRIES = 200;
+export const MAX_ZIP_UNCOMPRESSED = 384 * 1024 * 1024; // ~384 MB uncompressed
 
 export type OptimizedImage = {
   blob: Blob;
@@ -19,16 +31,6 @@ export type OptimizedImage = {
   height: number;
   optimized: boolean;
 };
-
-function createCanvasImage(bitmap: ImageBitmap): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas is not available.");
-  ctx.drawImage(bitmap, 0, 0);
-  return canvas;
-}
 
 async function blobToBitmap(blob: Blob): Promise<ImageBitmap> {
   try {
@@ -54,10 +56,22 @@ async function blobToBitmap(blob: Blob): Promise<ImageBitmap> {
 /**
  * Optimize one file. Throws with a user-friendly message for unsupported or
  * undecodable images (Bug #39/#41). Animated GIFs pass through untouched.
+ * HEIC/HEIF gets an honest, specific message when the browser cannot decode
+ * it — we never silently upload undecodable bytes (Bug #3).
  */
 export async function optimizeImageFile(file: File): Promise<OptimizedImage> {
   const mime = file.type.toLowerCase();
-  const bitmap = await blobToBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await blobToBitmap(file);
+  } catch (e) {
+    if (mime === "image/heic" || mime === "image/heif") {
+      throw new Error(
+        "HEIC/HEIF images are not supported by this browser. Please convert to JPG or PNG first.",
+      );
+    }
+    throw e;
+  }
   const srcW = bitmap.width;
   const srcH = bitmap.height;
 
@@ -84,10 +98,17 @@ export async function optimizeImageFile(file: File): Promise<OptimizedImage> {
 
   // Prefer WebP (smallest, modern); JPEG fallback; PNG last resort.
   let blob = await toBlob("image/webp", WEBP_QUALITY);
-  if (!blob) blob = await toBlob("image/jpeg", 0.9);
-  if (!blob) blob = await toBlob("image/png");
+  let encodedAs = "image/webp";
+  if (!blob) {
+    blob = await toBlob("image/jpeg", 0.9);
+    encodedAs = "image/jpeg";
+  }
+  if (!blob) {
+    blob = await toBlob("image/png");
+    encodedAs = "image/png";
+  }
   if (!blob) throw new Error("Could not optimise this image.");
-  return { blob, mime: blob.type || "image/webp", width: outW, height: outH, optimized: true };
+  return { blob, mime: blob.type || encodedAs, width: outW, height: outH, optimized: true };
 }
 
 /** Blob → data URL (the transport the existing server functions use). */
@@ -101,9 +122,11 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 /* ------------------------------------------------------------------ *
- * ZIP download (Bug #21/#22): real ZIP, deflate-compressed via the
+ * ZIP download (Bug #21/#22/#1): real ZIP, deflate-compressed via the
  * browser's native CompressionStream — no external library, no fake
- * download buttons.
+ * download buttons. Memory-safe: source bytes are streamed (never a
+ * second full ArrayBuffer), compressed parts are appended as Blob parts
+ * (no giant concatenation), and per-file work yields to the UI thread.
  * ------------------------------------------------------------------ */
 
 const CRC_TABLE = (() => {
@@ -121,40 +144,88 @@ function asBlobPart(u8: Uint8Array): BlobPart {
   return u8 as unknown as BlobPart;
 }
 
-function crc32(bytes: Uint8Array): number {
+/** Incremental CRC-32 over a stream — no full copy of the source is kept. */
+async function crc32FromStream(stream: ReadableStream<Uint8Array>): Promise<number> {
+  const reader = stream.getReader();
   let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i] ?? 0;
-    const idx = (crc ^ b) & 0xff;
-    crc = CRC_TABLE[idx]! ^ (crc >>> 8);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (let i = 0; i < value.length; i++) {
+      crc = CRC_TABLE[(crc ^ (value[i] ?? 0)) & 0xff]! ^ (crc >>> 8);
+    }
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  if (typeof CompressionStream === "undefined") return bytes; // STORE fallback
-  const stream = new Blob([asBlobPart(bytes)])
-    .stream()
-    .pipeThrough(new CompressionStream("deflate-raw"));
-  const buf = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buf);
+function canDeflate(): boolean {
+  return typeof CompressionStream !== "undefined" && typeof Response !== "undefined";
+}
+
+/** Size/count guard — clear error instead of freezing the browser (Bug #1). */
+export function assertZipWithinLimits(count: number, totalBytes: number): void {
+  if (!Number.isFinite(count) || count <= 0) throw new Error("No images to download.");
+  if (count > MAX_ZIP_ENTRIES) {
+    throw new Error(
+      `Too many images for one ZIP download (max ${MAX_ZIP_ENTRIES}). Download in smaller groups.`,
+    );
+  }
+  if (totalBytes > MAX_ZIP_UNCOMPRESSED) {
+    throw new Error(
+      "This selection is too large for a single ZIP download. Try downloading fewer images at a time.",
+    );
+  }
+}
+
+/** Let the browser breathe between files so the UI never freezes (Bug #1). */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /**
- * Build a real .zip (deflate) from the given blobs. Batched by the caller so
- * we never hold every full-resolution image in memory at once.
+ * Build a real .zip (deflate) from the given blobs.
+ *
+ * Memory model: for each entry the source blob is tee()d — one branch feeds
+ * an incremental CRC (no copy), the other pipes straight through
+ * CompressionStream into a compressed Blob part. Parts are never merged into
+ * one giant Uint8Array; the final zip is `new Blob([...parts, centralDir])`.
+ * Sanitised, de-duplicated entry names (Bug #8).
  */
 export async function buildZip(files: { name: string; blob: Blob }[]): Promise<Blob> {
+  const total = files.reduce((a, f) => a + f.blob.size, 0);
+  assertZipWithinLimits(files.length, total);
+
   const encoder = new TextEncoder();
-  const localParts: Uint8Array[] = [];
+  const method = canDeflate() ? 8 : 0;
+  const parts: BlobPart[] = [];
   const centralParts: Uint8Array[] = [];
+  const usedNames = new Set<string>();
   let offset = 0;
 
-  for (const { name, blob } of files) {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const method = typeof CompressionStream === "undefined" ? 0 : 8;
-    const compressed = method === 8 ? await deflateRaw(bytes) : bytes;
-    const crc = crc32(bytes);
+  for (let i = 0; i < files.length; i++) {
+    if (i > 0) await yieldToUi();
+    const rawName = files[i]?.name ?? "";
+    const name = sanitizeZipEntryName(rawName, usedNames);
+    const blob = files[i]!.blob;
+
+    let crc: number;
+    let dataPart: Blob;
+    let compSize: number;
+    if (method === 8) {
+      const [crcBranch, dataBranch] = blob.stream().tee();
+      const crcPromise = crc32FromStream(crcBranch);
+      const compressedBlob = await new Response(
+        dataBranch.pipeThrough(new CompressionStream("deflate-raw")),
+      ).blob();
+      crc = await crcPromise;
+      dataPart = compressedBlob;
+      compSize = compressedBlob.size;
+    } else {
+      crc = await crc32FromStream(blob.stream());
+      dataPart = blob;
+      compSize = blob.size;
+    }
+    const size = blob.size;
     const nameBytes = encoder.encode(name);
     const now = new Date();
     const dosTime =
@@ -171,12 +242,12 @@ export async function buildZip(files: { name: string; blob: Blob }[]): Promise<B
     lv.setUint16(10, dosTime, true);
     lv.setUint16(12, dosDate, true);
     lv.setUint32(14, crc, true);
-    lv.setUint32(18, compressed.length, true);
-    lv.setUint32(22, bytes.length, true);
+    lv.setUint32(18, compSize, true);
+    lv.setUint32(22, size, true);
     lv.setUint16(26, nameBytes.length, true);
     lv.setUint16(28, 0, true);
     local.set(nameBytes, 30);
-    localParts.push(local, compressed);
+    parts.push(asBlobPart(local), dataPart);
 
     const central = new Uint8Array(46 + nameBytes.length);
     const cv = new DataView(central.buffer);
@@ -188,8 +259,8 @@ export async function buildZip(files: { name: string; blob: Blob }[]): Promise<B
     cv.setUint16(12, dosTime, true);
     cv.setUint16(14, dosDate, true);
     cv.setUint32(16, crc, true);
-    cv.setUint32(20, compressed.length, true);
-    cv.setUint32(24, bytes.length, true);
+    cv.setUint32(20, compSize, true);
+    cv.setUint32(24, size, true);
     cv.setUint16(28, nameBytes.length, true);
     cv.setUint16(30, 0, true);
     cv.setUint16(32, 0, true);
@@ -200,7 +271,7 @@ export async function buildZip(files: { name: string; blob: Blob }[]): Promise<B
     central.set(nameBytes, 46);
     centralParts.push(central);
 
-    offset += local.length + compressed.length;
+    offset += local.length + compSize;
   }
 
   const centralDir = concatBytes(centralParts);
@@ -212,7 +283,7 @@ export async function buildZip(files: { name: string; blob: Blob }[]): Promise<B
   ev.setUint32(12, centralDir.length, true);
   ev.setUint32(16, offset, true);
 
-  return new Blob([asBlobPart(concatBytes([...localParts, centralDir, end]))], {
+  return new Blob([...parts, asBlobPart(centralDir), asBlobPart(end)], {
     type: "application/zip",
   });
 }
@@ -228,6 +299,27 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/* ------------------------------------------------------------------ *
+ * Downloads — real HTTP validation (Bug #14): never treat an HTML error
+ * page or a non-2xx response as an image.
+ * ------------------------------------------------------------------ */
+
+export async function fetchImageBlob(url: string): Promise<Blob> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Image could not be downloaded (HTTP ${res.status}).`);
+  }
+  const type = res.headers.get("content-type") ?? "";
+  if (type && !/^image\//.test(type)) {
+    throw new Error("Download failed: the file is not an image.");
+  }
+  const blob = await res.blob();
+  if (blob.size === 0 || (type && !/^image\//.test(type))) {
+    throw new Error("Download failed: the file is empty or not an image.");
+  }
+  return blob;
+}
+
 /** Trigger a real browser download of a blob. */
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -240,32 +332,52 @@ export function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/** Browser Web Share with a Copy-Link fallback (Bug #23). Returns what happened. */
-export async function shareGalleryUrl(url: string, title: string): Promise<"shared" | "copied"> {
+/* ------------------------------------------------------------------ *
+ * Sharing / copying — honest outcomes (Bug #15/#16): a user-initiated
+ * cancel of the native share is NOT reported as "copied", and "Link
+ * copied" is only ever claimed when a copy genuinely succeeded.
+ * ------------------------------------------------------------------ */
+
+export type ShareOutcome = "shared" | "copied" | "cancelled" | "failed";
+
+export async function shareGalleryUrl(url: string, title: string): Promise<ShareOutcome> {
   if (typeof navigator !== "undefined" && navigator.share) {
     try {
       await navigator.share({ title, url });
       return "shared";
-    } catch {
-      /* user cancelled or share failed — fall through to copy */
+    } catch (e) {
+      const err = e as DOMException;
+      // User deliberately cancelled the share sheet → stay silent, do NOT
+      // fall back to clipboard and do NOT claim "Link copied".
+      if (err?.name === "AbortError") return "cancelled";
+      if (err?.name === "NotAllowedError") return "cancelled"; // transient permission
+      // Any other failure → clipboard fallback below.
     }
   }
-  await copyText(url);
-  return "copied";
+  const copied = await copyText(url);
+  return copied ? "copied" : "failed";
 }
 
-export async function copyText(text: string): Promise<void> {
+/** Copy to clipboard. Returns true ONLY when the copy actually succeeded. */
+export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
+    // Legacy execCommand fallback — verify its boolean result.
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
   }
 }
 

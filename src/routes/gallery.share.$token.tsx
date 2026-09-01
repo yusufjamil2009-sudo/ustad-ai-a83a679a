@@ -28,6 +28,7 @@ import type { GalleryImage } from "@/lib/gallery.server";
 import {
   buildZip,
   downloadBlob,
+  fetchImageBlob,
   shareGalleryUrl,
   copyText,
   formatBytes,
@@ -64,6 +65,11 @@ function PublicGalleryPage() {
     try {
       const res = (await galleryPublicFn({ data: { shareToken: token } })) as unknown as PublicData;
       setData(res);
+      // Prune selection to ids that still exist after a reload (Bug #13) —
+      // never attempt to download deleted/nonexistent images.
+      setSelected(
+        (sel) => new Set([...sel].filter((id) => (res.images ?? []).some((i) => i.id === id))),
+      );
     } catch (e) {
       setError((e as Error).message || "This gallery could not be loaded.");
     } finally {
@@ -94,18 +100,19 @@ function PublicGalleryPage() {
     setBusy(true);
     try {
       if (target.length === 1) {
-        const res = await fetch(target[0]!.url);
-        const blob = await res.blob();
+        // Real HTTP validation (Bug #14): non-2xx / non-image responses fail.
+        const blob = await fetchImageBlob(target[0]!.url);
         downloadBlob(blob, target[0]!.originalName || "image");
         toast.success("Image downloaded.");
       } else {
-        // batched: one at a time — never all full-resolution images in memory (Bug #35)
+        // batched, one at a time — never all full-resolution images in memory;
+        // buildZip() streams + enforces hard size/count limits (Bug #1/#35).
         const files: { name: string; blob: Blob }[] = [];
         for (const img of target) {
-          const res = await fetch(img.url);
+          const blob = await fetchImageBlob(img.url);
           files.push({
             name: img.originalName || `${img.id}.${extOf(img.mime)}`,
-            blob: await res.blob(),
+            blob,
           });
         }
         const zip = await buildZip(files);
@@ -120,6 +127,13 @@ function PublicGalleryPage() {
   };
 
   const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+
+  // Host label must match between SSR and client to avoid hydration mismatch;
+  // resolve it after mount only (server renders a stable placeholder).
+  const [hostLabel, setHostLabel] = useState("USTAD AI");
+  useEffect(() => {
+    setHostLabel(typeof window !== "undefined" ? window.location.hostname : "USTAD AI");
+  }, []);
 
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background text-foreground">
@@ -137,7 +151,7 @@ function PublicGalleryPage() {
           href="/"
           className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
-          ustad-ai.com
+          {hostLabel}
         </a>
       </header>
 
@@ -186,11 +200,15 @@ function PublicGalleryPage() {
                   variant="secondary"
                   disabled={busy}
                   onClick={async () => {
+                    // User-cancel stays silent (Bug #15); clipboard fallback
+                    // only on a real share failure; honest error otherwise.
                     const how = await shareGalleryUrl(shareUrl, "USTAD Gallery");
                     if (how === "copied") {
                       setCopied(true);
                       toast.success("Link copied.");
                       window.setTimeout(() => setCopied(false), 2000);
+                    } else if (how === "failed") {
+                      toast.error("Could not share or copy the link. Try Copy Link instead.");
                     }
                   }}
                 >
@@ -244,10 +262,15 @@ function PublicGalleryPage() {
                 size="sm"
                 variant="secondary"
                 onClick={async () => {
-                  await copyText(shareUrl);
-                  setCopied(true);
-                  toast.success("Link copied.");
-                  window.setTimeout(() => setCopied(false), 2000);
+                  // Only claim "Link copied" when the copy truly succeeded (Bug #16).
+                  const ok = await copyText(shareUrl);
+                  if (ok) {
+                    setCopied(true);
+                    toast.success("Link copied.");
+                    window.setTimeout(() => setCopied(false), 2000);
+                  } else {
+                    toast.error("Could not copy the link.");
+                  }
                 }}
               >
                 {copied ? <Check className="mr-1 size-3.5" /> : <Link2 className="mr-1 size-3.5" />}
