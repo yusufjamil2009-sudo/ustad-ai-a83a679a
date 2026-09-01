@@ -12,6 +12,7 @@ import * as chapterMaster from "./chapter-master.server";
 import * as chapterLesson from "./chapter-lesson.server";
 import * as questionEngine from "./question-engine.server";
 import * as doubt from "./doubt.server";
+import * as gallery from "./gallery.server";
 import type { Language } from "./router.server";
 
 type Tbl = "memories" | "goals" | "notes" | "reminders" | "lessons" | "exams" | "exam_results";
@@ -95,6 +96,46 @@ export const clearCacheFn = createServerFn({ method: "POST" })
 export const clearDataFn = createServerFn({ method: "POST" })
   .inputValidator((d: { token: string; scopes: string[] }) => d)
   .handler(async ({ data: d }) => data.clearData(d.token, d.scopes));
+
+/* ---- USTAD Gallery (owner ops — guest token required) ---- */
+
+export const galleryListFn = createServerFn({ method: "POST" })
+  .inputValidator((d: { token: string }) => d)
+  .handler(async ({ data: d }) => gallery.listGallery(d.token));
+
+export const galleryUploadFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (d: {
+      token: string;
+      file: {
+        name: string;
+        mime: string;
+        size: number;
+        width?: number;
+        height?: number;
+        dataUrl: string;
+      };
+    }) => d,
+  )
+  .handler(async ({ data: d }) => gallery.uploadGalleryImage(d.token, d.file));
+
+export const galleryDeleteFn = createServerFn({ method: "POST" })
+  .inputValidator((d: { token: string; ids: string[] }) => d)
+  .handler(async ({ data: d }) => gallery.deleteGalleryImages(d.token, d.ids));
+
+export const galleryCreateShareFn = createServerFn({ method: "POST" })
+  .inputValidator((d: { token: string; imageIds?: string[] }) => d)
+  .handler(async ({ data: d }) => gallery.createGalleryShare(d.token, d.imageIds));
+
+export const galleryListSharesFn = createServerFn({ method: "POST" })
+  .inputValidator((d: { token: string }) => d)
+  .handler(async ({ data: d }) => gallery.listGalleryShares(d.token));
+
+/* ---- USTAD Gallery (PUBLIC share access — share token is the key) ---- */
+
+export const galleryPublicFn = createServerFn({ method: "POST" })
+  .inputValidator((d: { shareToken: string }) => d)
+  .handler(async ({ data: d }) => gallery.getPublicGallery(d.shareToken));
 
 /* ---- API manager ---- */
 

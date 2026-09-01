@@ -121,6 +121,124 @@ export type Database = {
           },
         ]
       }
+      gallery_images: {
+        Row: {
+          created_at: string
+          file_size: number
+          guest_id: string
+          height: number
+          id: string
+          mime: string
+          optimized: boolean
+          original_name: string
+          storage_path: string
+          width: number
+        }
+        Insert: {
+          created_at?: string
+          file_size?: number
+          guest_id: string
+          height?: number
+          id?: string
+          mime: string
+          optimized?: boolean
+          original_name?: string
+          storage_path: string
+          width?: number
+        }
+        Update: {
+          created_at?: string
+          file_size?: number
+          guest_id?: string
+          height?: number
+          id?: string
+          mime?: string
+          optimized?: boolean
+          original_name?: string
+          storage_path?: string
+          width?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gallery_images_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gallery_share_items: {
+        Row: {
+          created_at: string
+          image_id: string
+          share_id: string
+        }
+        Insert: {
+          created_at?: string
+          image_id: string
+          share_id: string
+        }
+        Update: {
+          created_at?: string
+          image_id?: string
+          share_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gallery_share_items_image_id_fkey"
+            columns: ["image_id"]
+            isOneToOne: false
+            referencedRelation: "gallery_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gallery_share_items_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "gallery_shares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gallery_shares: {
+        Row: {
+          created_at: string
+          guest_id: string
+          id: string
+          share_token: string
+          signature: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          guest_id: string
+          id?: string
+          share_token: string
+          signature?: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          guest_id?: string
+          id?: string
+          share_token?: string
+          signature?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gallery_shares_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           created_at: string

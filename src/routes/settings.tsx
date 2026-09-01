@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Loader2, KeyRound, User, Sliders, ShieldAlert, Trash2, Plug } from "lucide-react";
+import { Loader2, KeyRound, User, Sliders, ShieldAlert, Trash2, Plug, Images } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/AppShell";
+import { GallerySection } from "@/components/GallerySection";
 import { PwaInstallCard } from "@/components/PwaInstallCard";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 
@@ -95,6 +96,9 @@ function SettingsPage() {
             <TabsTrigger value="data">
               <ShieldAlert className="mr-1 size-4" /> Data
             </TabsTrigger>
+            <TabsTrigger value="gallery">
+              <Images className="mr-1 size-4" /> USTAD Gallery
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="apis" className="mt-4">
@@ -109,6 +113,9 @@ function SettingsPage() {
           </TabsContent>
           <TabsContent value="data" className="mt-4">
             <DataPanel token={token} guestId={session?.guestId ?? ""} />
+          </TabsContent>
+          <TabsContent value="gallery" className="mt-4">
+            {ready ? <GallerySection /> : null}
           </TabsContent>
         </Tabs>
       </div>

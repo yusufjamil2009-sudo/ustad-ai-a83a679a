@@ -52,6 +52,13 @@ export const beginDirectUploadFn = wrap(fns.beginDirectUploadFn);
 export const finalizeDirectUploadFn = wrap(fns.finalizeDirectUploadFn);
 export const clearCacheFn = wrap(fns.clearCacheFn);
 export const clearDataFn = wrap(fns.clearDataFn);
+export const galleryListFn = wrap(fns.galleryListFn);
+export const galleryUploadFn = wrap(fns.galleryUploadFn);
+export const galleryDeleteFn = wrap(fns.galleryDeleteFn);
+export const galleryCreateShareFn = wrap(fns.galleryCreateShareFn);
+export const galleryListSharesFn = wrap(fns.galleryListSharesFn);
+/** Public share data — no guest token needed; the share token IS the key. */
+export const galleryPublicFn = fns.galleryPublicFn;
 export const listApiConfigsFn = wrap(fns.listApiConfigsFn);
 export const saveApiConfigFn = wrap(fns.saveApiConfigFn);
 export const testApiConfigFn = wrap(fns.testApiConfigFn);

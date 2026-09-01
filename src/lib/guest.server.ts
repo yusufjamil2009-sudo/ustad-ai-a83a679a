@@ -5,6 +5,22 @@
  * with an HMAC-signed token. Every server function verifies the signature
  * before touching data, so a client can never claim another guest's ID.
  */
+
+/**
+ * Node 20 dev-compat: @supabase/supabase-js v2.112 requires a WebSocket global
+ * (Node 22 has it natively). Provide the `ws` implementation when missing so
+ * the dev server can run on Node 20; production on Node 22+ skips this.
+ */
+if (typeof globalThis !== "undefined" && !globalThis.WebSocket) {
+  try {
+    const { createRequire } = await import("node:module");
+    const ws = createRequire(import.meta.url)("ws") as typeof import("ws");
+    (globalThis as Record<string, unknown>)["WebSocket"] = ws.WebSocket;
+  } catch {
+    /* no ws available — realtime is unavailable but everything else works */
+  }
+}
+
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const enc = new TextEncoder();

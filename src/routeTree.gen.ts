@@ -19,6 +19,7 @@ import { Route as StudyRouteImport } from './routes/study'
 import { Route as ExamsIndexRouteImport } from './routes/exams.index'
 import { Route as ExamsExamIdRouteImport } from './routes/exams.$examId'
 import { Route as ApiPublicExamSchedulerRouteImport } from './routes/api/public/exam-scheduler'
+import { Route as GalleryShareTokenRouteImport } from './routes/gallery.share.$token'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -70,6 +71,11 @@ const ApiPublicExamSchedulerRoute = ApiPublicExamSchedulerRouteImport.update({
   path: '/api/public/exam-scheduler',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GalleryShareTokenRoute = GalleryShareTokenRouteImport.update({
+  id: '/gallery/share/$token',
+  path: '/gallery/share/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams/': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/gallery/share/$token': typeof GalleryShareTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/gallery/share/$token': typeof GalleryShareTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams/': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/gallery/share/$token': typeof GalleryShareTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams/'
     | '/api/public/exam-scheduler'
+    | '/gallery/share/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams'
     | '/api/public/exam-scheduler'
+    | '/gallery/share/$token'
   id:
     | '__root__'
     | '/'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams/'
     | '/api/public/exam-scheduler'
+    | '/gallery/share/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   ExamsExamIdRoute: typeof ExamsExamIdRoute
   ExamsIndexRoute: typeof ExamsIndexRoute
   ApiPublicExamSchedulerRoute: typeof ApiPublicExamSchedulerRoute
+  GalleryShareTokenRoute: typeof GalleryShareTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicExamSchedulerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gallery/share/$token': {
+      id: '/gallery/share/$token'
+      path: '/gallery/share/$token'
+      fullPath: '/gallery/share/$token'
+      preLoaderRoute: typeof GalleryShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExamsExamIdRoute: ExamsExamIdRoute,
   ExamsIndexRoute: ExamsIndexRoute,
   ApiPublicExamSchedulerRoute: ApiPublicExamSchedulerRoute,
+  GalleryShareTokenRoute: GalleryShareTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
