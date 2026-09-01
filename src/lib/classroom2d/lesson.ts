@@ -61,8 +61,8 @@ const PHRASES = {
       "Now a real-life example, because a concept you can picture is a concept you remember.",
     mistake: "Common mistake",
     mistakeSay: "This is the mistake most students make in the exam, so I am writing it down.",
-    model: "Let's inspect a 3D model of it together.",
-    spin: "I will rotate it so you can see every side.",
+    model: "Let me draw this on the board so you can see the whole idea.",
+    spin: "I will label every part so it is clear.",
     ask: "Your turn",
     askSay: "Quick question for you — can you say this idea back to me in one line?",
     recap: "Recap",
@@ -82,8 +82,8 @@ const PHRASES = {
     exampleSay: "अब एक वास्तविक जीवन का उदाहरण, क्योंकि जो दिख जाता है वही याद रहता है।",
     mistake: "आम गलती",
     mistakeSay: "परीक्षा में विद्यार्थी यही गलती करते हैं, इसलिए मैं इसे बोर्ड पर लिख रहा हूँ।",
-    model: "चलिए इसका 3D मॉडल साथ में देखें।",
-    spin: "मैं इसे घुमा रहा हूँ ताकि हर तरफ़ दिखे।",
+    model: "चलिए इसे बोर्ड पर बनाकर दिखाता हूँ ताकि पूरी बात स्पष्ट हो जाए।",
+    spin: "मैं हर भाग का नाम लिख दूँगा ताकि सब स्पष्ट हो।",
     ask: "आपकी बारी",
     askSay: "एक छोटा सवाल — क्या आप यह बात एक पंक्ति में बता सकते हैं?",
     recap: "दोहराव",
@@ -104,8 +104,8 @@ const PHRASES = {
     mistake: "Common mistake",
     mistakeSay:
       "Exam mein students yahi galti karte hain, isliye main ise board par likh raha hoon.",
-    model: "Chaliye iska 3D model saath mein dekhte hain.",
-    spin: "Main ise rotate kar raha hoon taaki har side dikhe.",
+    model: "Chaliye ise board par bana kar dikhata hoon taaki poori baat clear ho jaye.",
+    spin: "Main har hisse ka naam likh dunga taaki sab clear ho.",
     ask: "Aapki baari",
     askSay: "Ek chhota sawal — kya aap yeh baat ek line mein bata sakte hain?",
     recap: "Recap",
@@ -814,11 +814,11 @@ export function buildLessonPlanFromContent(
     });
   }
 
-  // The 3D model only exists for topics with a real model behind them.
+  // A labelled board diagram is drawn for topics with a real figure behind them.
   if (subjectKnown) {
     push({
       phase: "diagram",
-      label: "3D model",
+      label: "Diagram",
       say: t.model,
       teacher: "explain",
       moveTo: "right",
@@ -828,7 +828,7 @@ export function buildLessonPlanFromContent(
     });
     push({
       phase: "diagram",
-      label: "3D model",
+      label: "Diagram labels",
       say: t.spin,
       teacher: "point",
       pointAt: "object",
@@ -1002,41 +1002,42 @@ const DOUBT: Record<
   english: {
     intro: (q) => `Good question. You asked: ${q}. Let me answer that on the board.`,
     build3d:
-      "Good question. That one is easier to see than to write — let me build it in 3D right here.",
-    model: "Here is a 3D model of it. Watch closely.",
+      "Good question. That one is easier to see than to write — let me draw it on the board right here.",
+    model: "Here it is on the board. Watch closely.",
     labels: (l, e) => `Look at the labels: ${l}. Notice that ${e}.`,
-    rotate: "I'll rotate the model so you can see every side of it.",
+    rotate: "I'll point to every part of it as I explain.",
     keepLine: "On the board I'll keep one line so you remember it.",
     backTo: (t) => `Clear now? Good — back to ${t}.`,
     shortAnswer: (t) => `Here is the short answer, then we continue with ${t}.`,
     explainModel: (t) =>
-      `Look at this model while I explain it — that is the key idea behind ${t}.`,
+      `Look at this drawing while I explain it — that is the key idea behind ${t}.`,
     cleared: "Doubt cleared? Good — let's get back to the lesson.",
     qPrefix: "Q",
   },
   hindi: {
     intro: (q) => `अच्छा सवाल। आपने पूछा: ${q}. मैं इसका उत्तर बोर्ड पर लिखता हूँ।`,
-    build3d: "अच्छा सवाल। इसे लिखने से बेहतर है दिखाना — मैं इसे यहीं 3D में बनाता हूँ।",
-    model: "यह इसका 3D मॉडल है। ध्यान से देखिए।",
+    build3d: "अच्छा सवाल। इसे लिखने से बेहतर है दिखाना — मैं इसे यहीं बोर्ड पर बनाता हूँ।",
+    model: "यह इसे बोर्ड पर दिखाया गया है। ध्यान से देखिए।",
     labels: (l, e) => `लेबल देखिए: ${l}. ध्यान दीजिए कि ${e}.`,
-    rotate: "मैं मॉडल घुमा रहा हूँ ताकि हर तरफ़ दिख जाए।",
+    rotate: "मैं इसके हर भाग की ओर इशारा करके समझाता हूँ।",
     keepLine: "बोर्ड पर एक पंक्ति लिख देता हूँ ताकि याद रहे।",
     backTo: (t) => `अब स्पष्ट है? अच्छा — वापस ${t} पर चलते हैं।`,
     shortAnswer: (t) => `यह रहा छोटा उत्तर, फिर हम ${t} जारी रखेंगे।`,
-    explainModel: (t) => `इस मॉडल को देखिए — यही ${t} की मुख्य बात है।`,
+    explainModel: (t) => `इस चित्र को देखिए — यही ${t} की मुख्य बात है।`,
     cleared: "शंका दूर हुई? अच्छा — पाठ पर वापस चलते हैं।",
     qPrefix: "प्रश्न",
   },
   hinglish: {
     intro: (q) => `Accha sawal. Aapne poocha: ${q}. Main ise board par likh kar samjhata hoon.`,
-    build3d: "Accha sawal. Ise likhne se behtar hai dikhana — main ise yahin 3D mein banata hoon.",
-    model: "Yeh iska 3D model hai. Dhyan se dekhiye.",
+    build3d:
+      "Accha sawal. Ise likhne se behtar hai dikhana — main ise yahin board par banata hoon.",
+    model: "Yeh ise board par dikhaya gaya hai. Dhyan se dekhiye.",
     labels: (l, e) => `Labels dekhiye: ${l}. Dhyan dijiye ki ${e}.`,
-    rotate: "Main model rotate kar raha hoon taaki har side dikhe.",
+    rotate: "Main iske har hisse ki taraf ishara kar ke samjhata hoon.",
     keepLine: "Board par ek line likh deta hoon taaki yaad rahe.",
     backTo: (t) => `Clear ho gaya? Accha — wapas ${t} par chalte hain.`,
     shortAnswer: (t) => `Yeh raha short answer, phir hum ${t} continue karenge.`,
-    explainModel: (t) => `Is model ko dekhiye — yahi ${t} ki key idea hai.`,
+    explainModel: (t) => `Is drawing ko dekhiye — yahi ${t} ki key idea hai.`,
     cleared: "Doubt clear ho gaya? Accha — lesson par wapas chalte hain.",
     qPrefix: "Q",
   },
@@ -1097,8 +1098,8 @@ function buildDiagram3DAnswer(
       moveTo: "board",
       pointAt: "board",
       board: [
-        { op: "write", text: `3D: ${question}`, size: 46 },
-        { op: "highlight", text: `3D: ${question}` },
+        { op: "write", text: `${d.qPrefix}: ${question}`, size: 46 },
+        { op: "highlight", text: `${d.qPrefix}: ${question}` },
       ],
       sfx: "chalk",
     },
@@ -1260,13 +1261,13 @@ export function buildDoubtStepsFromAnswer(
     });
   });
 
-  // Optional 3D enhancement AFTER the real AI answer (Bug 9) — never a replacement.
+  // Optional board-diagram enhancement AFTER the real AI answer — never a replacement.
   if (visual) {
     const objectId = `doubt3d-${stamp}`;
     const base = { id: objectId, kind: visual.kind, labels: visual.labels };
     push({
       phase: "diagram",
-      label: "3D model",
+      label: "Diagram",
       say: d.model,
       teacher: "point",
       moveTo: "right",

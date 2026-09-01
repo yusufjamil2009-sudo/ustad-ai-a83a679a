@@ -4,22 +4,45 @@ import { usableProviders } from "./api-manager.server";
 import { ttsSynthesize, sttTranscribe } from "./provider-clients.server";
 import { normalizeForSpeech } from "./speech-normalize";
 
+/**
+ * TTS priority (Section 15/16 of the classroom spec): ElevenLabs first, then
+ * Deepgram, then OpenAI. Each configured provider is TRIED in order; if one
+ * fails, the next is attempted. Only when every configured provider fails do we
+ * throw — the client then falls back to browser speech. This is the graceful
+ * provider-failure chain, never a lesson restart.
+ */
+export const VOICE_TTS_ORDER = ["elevenlabs", "deepgram", "openai"] as const;
+
 export async function synthesize(input: {
   token: unknown;
   text: string;
   provider?: string | undefined;
+  /** classroom teaching language ("english" | "hindi" | "hinglish") — forwarded to providers that support it */
+  language?: string | undefined;
 }) {
   const guestId = await requireGuest(input.token);
   const available = await usableProviders(guestId);
-  const order = input.provider ? [input.provider] : ["elevenlabs", "deepgram", "openai"];
-  const chosen = order.map((p) => available.find((a) => a.provider === p)).find(Boolean);
-  if (!chosen) throw new Error("No voice provider is connected. Browser voice is still available.");
-  const audio = await ttsSynthesize(
-    chosen.provider,
-    chosen.config,
-    normalizeForSpeech(input.text).slice(0, 4000),
+  const requested = input.provider ? [input.provider] : [...VOICE_TTS_ORDER];
+  const order = [...new Set([...requested, ...VOICE_TTS_ORDER])].filter((p) => p !== "browser");
+  const usable = order.map((p) => available.find((a) => a.provider === p)).filter(Boolean);
+  if (!usable.length) {
+    throw new Error("No voice provider is connected. Browser voice is still available.");
+  }
+  const text = normalizeForSpeech(input.text).slice(0, 4000);
+  const errors: string[] = [];
+  // Try each configured provider in priority order; the first success wins.
+  // A single broken/expired provider can never silence the classroom (Bug 21).
+  for (const chosen of usable) {
+    try {
+      const audio = await ttsSynthesize(chosen!.provider, chosen!.config, text);
+      return { ...audio, provider: chosen!.provider, language: input.language ?? "english" };
+    } catch (e) {
+      errors.push(`${chosen!.provider}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  throw new Error(
+    `All voice providers failed (${errors.join("; ")}). Browser voice is still available.`,
   );
-  return { ...audio, provider: chosen.provider };
 }
 
 /** Fallback STT via the built-in Lovable AI gateway (no user API key needed). */
@@ -30,10 +53,14 @@ async function gatewayTranscribe(base64: string, mime: string): Promise<string> 
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const base = (mime || "audio/webm").split(";")[0] ?? "audio/webm";
   const ext =
-    ({ "audio/webm": "webm", "audio/mp4": "mp4", "audio/mpeg": "mp3", "audio/wav": "wav" } as Record<
-      string,
-      string
-    >)[base] ?? "webm";
+    (
+      {
+        "audio/webm": "webm",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+      } as Record<string, string>
+    )[base] ?? "webm";
   const form = new FormData();
   form.append("model", "openai/gpt-4o-mini-transcribe");
   form.append("file", new Blob([bytes as unknown as BlobPart], { type: base }), `recording.${ext}`);

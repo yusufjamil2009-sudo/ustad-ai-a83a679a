@@ -107,8 +107,9 @@ test("no production-path display:none hides a feature on mobile without alt UI",
 
 test("classroom stage uses responsive vh (not fixed) and has touch-sized controls", () => {
   const c = read("src/routes/classroom.tsx");
-  assert.match(c, /h-\[52vh\]/);
-  assert.match(c, /min-h-\[320px\]/);
+  assert.match(c, /h-\[(5|6|7)\dvh\]/);
+  assert.match(c, /min-h-\[3\d0px\]/);
+  assert.match(c, /md:h-\[7\dvh\]/);
   assert.match(c, /flex-wrap/);
 });
 

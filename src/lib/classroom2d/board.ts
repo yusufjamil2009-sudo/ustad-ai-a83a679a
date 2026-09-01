@@ -38,7 +38,6 @@ const BAND_STEP = Math.round(BOARD_H * 0.62);
 /** Auto-scroll smoothing (viewport px/s follow rate, frame-rate independent). */
 const SCROLL_K = 6;
 
-
 /**
  * AUTHORITATIVE typography metric (§7). Layout, collision, snapshot sizing,
  * underline geometry and the pen-tip tracker ALL use this one function — there
@@ -66,8 +65,8 @@ const FONT_STACK = '"Noto Sans Devanagari", Sora, "Segoe UI", sans-serif';
  * engine is a TOKEN that is resolved per theme at paint time, so a
  * theme switch never has to rewrite or re-layout existing content.
  * ------------------------------------------------------------------ */
-export type BoardTheme = "chalkboard" | "whiteboard" | "blackboard";
-export const BOARD_THEMES: BoardTheme[] = ["chalkboard", "blackboard", "whiteboard"];
+export type BoardTheme = "chalkboard" | "whiteboard" | "blackboard" | "digital";
+export const BOARD_THEMES: BoardTheme[] = ["chalkboard", "blackboard", "whiteboard", "digital"];
 
 type Palette = {
   bg0: string;
@@ -127,6 +126,20 @@ const PALETTES: Record<BoardTheme, Palette> = {
     good: "#15803d",
     hlFill: "rgba(180, 83, 9, 0.16)",
   },
+  digital: {
+    bg0: "#101b33",
+    bg1: "#0a1224",
+    frame: "rgba(120,180,255,0.16)",
+    watermark: "rgba(160,200,255,0.34)",
+    ink: "#eaf4ff",
+    ink2: "#b9d4ff",
+    warm: "#ffd166",
+    cool: "#4ade80",
+    hl: "#fbbf24",
+    accent: "#f472b6",
+    good: "#34d399",
+    hlFill: "rgba(251, 191, 36, 0.18)",
+  },
 };
 
 /**
@@ -161,7 +174,6 @@ function ink(color: string): string {
   const key = TOKEN_OF[color];
   return key ? (PAL[key] as string) : color;
 }
-
 
 export type BoardRole =
   "title" | "concept" | "formula" | "diagram" | "example" | "summary" | "mark";
@@ -226,7 +238,6 @@ const REGIONS: Record<string, Region> = {
   example: { name: "example", x: 760, y: 758, w: 600, h: 190 },
   summary: { name: "summary", x: 120, y: 758, w: 2300, h: 190 },
 };
-
 
 const ROLE_REGION: Record<BoardRole, string[]> = {
   title: ["title", "concept"],
@@ -630,6 +641,8 @@ export class BoardEngine {
   private nextId = 1;
   private nextZ = 1;
   private dirty = true;
+  /** timestamp of the last USER-initiated scroll (drag / wheel / slider) */
+  private lastManualScroll = 0;
   /** freehand drawing state (mouse / touch / stylus) */
   private drawMode = false;
   private penSize = 8;
@@ -754,7 +767,11 @@ export class BoardEngine {
   }
 
   beginStroke(x: number, y: number, pressure = 0.5): void {
-    this.live = { points: [[x, y, this.pressure(pressure)]], color: this.penColor, size: this.penSize };
+    this.live = {
+      points: [[x, y, this.pressure(pressure)]],
+      color: this.penColor,
+      size: this.penSize,
+    };
     this.dirty = true;
   }
 
@@ -825,6 +842,7 @@ export class BoardEngine {
         const [x, y] = this.clientToContent(e.clientX, e.clientY);
         this.extendStroke(x, y, e.pressure);
       } else if (panning) {
+        this.markManualScroll();
         const r = el.getBoundingClientRect();
         const scale = H / Math.max(1, r.height);
         this.scrollTo(this.scroll - (e.clientY - lastY) * scale, true);
@@ -839,6 +857,7 @@ export class BoardEngine {
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      this.markManualScroll();
       const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
       const r = el.getBoundingClientRect();
       this.scrollTo(this.scroll + dy * (H / Math.max(1, r.height)), true);
@@ -898,7 +917,6 @@ export class BoardEngine {
     this.paintTo(c, 0, total);
     return cv;
   }
-
 
   /* ---------------- layout engine ---------------- */
 
@@ -1070,11 +1088,24 @@ export class BoardEngine {
     this.dirty = true;
   }
 
-  /** Keep the item that is being written inside the visible window. */
+  /** User-initiated scroll (drag / wheel / slider) — pauses auto-follow briefly. */
+  markManualScroll(): void {
+    this.lastManualScroll = Date.now();
+  }
+
+  /**
+   * Keep the item that is being written inside the visible window (§10).
+   * If the user scrolled UP to read earlier notes, auto-follow backs off for a
+   * while (unless the viewport is already near the bottom) — the student is
+   * never dragged away from what they are reading.
+   */
   private followItem(i: Item): void {
     const r = this.rectOf(i);
     const top = r.y - PAD * 2;
     const bottom = r.y + r.h + PAD * 2;
+    const userAway = Date.now() - this.lastManualScroll < 8000;
+    const nearBottom = this.scrollY > Math.max(0, this.contentHeight - H - H * 0.25);
+    if (userAway && !nearBottom) return;
     if (bottom > this.scrollTargetY + H) this.scrollTo(bottom - H);
     else if (top < this.scrollTargetY) this.scrollTo(top);
   }
@@ -1115,7 +1146,6 @@ export class BoardEngine {
     this.followItem(item);
     return item;
   }
-
 
   /** Measure + add ONE math item at a proven size (called only when it fits). */
   private addMath(src: string, role: BoardRole, ms: number, protect: readonly Item[] = []): Item {
@@ -1453,6 +1483,23 @@ export class BoardEngine {
         }
         break;
       }
+      case "scroll": {
+        // semantic scroll — move the viewport to a content offset (clamped)
+        if (Number.isFinite(op.y)) this.scrollTo(Math.max(0, op.y));
+        break;
+      }
+      case "clear_section": {
+        // semantic section clear — archive everything overlapping the region,
+        // preserving all other taught content (§23 CLEAR_SECTION)
+        const [x, y, w, h] = op.region ?? [0, 0, W, H];
+        const keep: Item[] = [];
+        for (const i of this.items) {
+          if (this.overlaps({ x, y, w, h }, i)) this.archived.push(i);
+          else keep.push(i);
+        }
+        this.items = keep;
+        break;
+      }
       case "clear":
         // an explicit clear is the ONLY way taught content leaves the board
         this.archived.push(...this.items);
@@ -1700,6 +1747,22 @@ export class BoardEngine {
     grad.addColorStop(1, PAL.bg1);
     c.fillStyle = grad;
     c.fillRect(0, 0, W, viewH);
+    if (this.theme === "digital") {
+      // digital smart-board grid — subtle so ink stays dominant
+      c.strokeStyle = "rgba(120,180,255,0.07)";
+      c.lineWidth = 2;
+      const step = 90;
+      c.beginPath();
+      for (let gx = step; gx < W; gx += step) {
+        c.moveTo(gx, 0);
+        c.lineTo(gx, viewH);
+      }
+      for (let gy = step; gy < viewH; gy += step) {
+        c.moveTo(0, gy);
+        c.lineTo(W, gy);
+      }
+      c.stroke();
+    }
     c.strokeStyle = PAL.frame;
     c.lineWidth = 6;
     c.strokeRect(24, 24, W - 48, viewH - 48);
@@ -1709,7 +1772,6 @@ export class BoardEngine {
     c.fillText("USTAD AI", W - 70, 90);
     c.textAlign = "left";
     c.textBaseline = "top";
-
 
     // SCROLLING VIEWPORT: only the band currently in view is drawn; content that
     // has scrolled out stays in the item list (never deleted) and simply is not
@@ -1890,7 +1952,6 @@ export class BoardEngine {
     c.restore();
   }
 
-
   dispose(): void {
     // §46/§49: no callback can fire into a disposed engine.
     delete this.onChalk;
@@ -1900,7 +1961,6 @@ export class BoardEngine {
     this.archived = [];
     this.canvas.remove();
   }
-
 }
 
 /** Diagram engine — procedural educational diagrams drawn on the board canvas. */

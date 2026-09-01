@@ -34,10 +34,7 @@ export async function downloadBoardPng(canvas: HTMLCanvasElement, topic: string)
 }
 
 /** Download the board as a real multi-page PDF (one page per board band). */
-export async function downloadBoardPdf(
-  pages: HTMLCanvasElement[],
-  topic: string,
-): Promise<void> {
+export async function downloadBoardPdf(pages: HTMLCanvasElement[], topic: string): Promise<void> {
   if (!pages.length) throw new Error("Nothing written on the board yet.");
   const { downloadPdfFromPngs } = await import("../diagrams/pdf");
   await downloadPdfFromPngs(

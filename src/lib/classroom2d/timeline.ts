@@ -30,6 +30,12 @@ export class TimelineEngine {
   speed = 1;
   /** Board gate — a beat never ends while its writing is still unfinished. */
   isBoardBusy: () => boolean = () => false;
+  /**
+   * Speech gate — a beat never ends while the authoritative voice controller
+   * still has a pending/active request (provider TTS has network latency, so
+   * this is what stops the timeline from advancing BEFORE speech starts).
+   */
+  isSpeechPending: () => boolean = () => false;
 
   onStep?: StepHandler;
   onFinish?: (plan: LessonPlan) => void;
@@ -297,17 +303,27 @@ export class TimelineEngine {
      * Speech gate. Some browsers have no usable voice and never fire a start or
      * end event; waiting on them stalled every beat until the safety timeout and
      * made lessons crawl. If narration never started, don't wait for it.
+     *
+     * With provider TTS the voice controller reports `isSpeechPending` while a
+     * request is in flight/playing; while pending we NEVER advance (§13/§40) —
+     * that is what stops the timeline from skipping ahead of a sentence. A hard
+     * grace (18 s) covers a hung provider request so a dead voice can never
+     * freeze the lesson forever.
      */
-    const spoken = !step.say || this.speechDone || (!this.speechStarted && this.elapsed > 1.2);
+    const neverSpoke = !this.speechStarted;
+    const spokeNow =
+      this.speechDone || (neverSpoke && !this.isSpeechPending() && this.elapsed > 1.2);
+    const hungVoice = neverSpoke && this.elapsed > 18;
+    const spoken = !step.say || spokeNow || hungVoice;
     const written = !step.board?.length || !this.isBoardBusy();
     if (this.elapsed >= effective && spoken && written) {
       this.speechDone = false;
       this.speechStarted = false;
       this.next();
-    } else if (this.elapsed >= effective + 10 && written) {
-      // Safety timeout for a stuck speech engine ONLY. Never advance while the
-      // board is still writing (Bug 10) — writing is content-driven and may
-      // legitimately outlast the planned beat.
+    } else if (this.elapsed >= effective + 10 && written && !this.isSpeechPending()) {
+      // Safety timeout for a stuck speech engine ONLY (never while speech is
+      // still pending, and never while the board is still writing — writing is
+      // content-driven and may legitimately outlast the planned beat).
       this.speechDone = false;
       this.speechStarted = false;
       this.next();

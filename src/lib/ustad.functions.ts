@@ -198,7 +198,7 @@ export const generateNotesFn = createServerFn({ method: "POST" })
 /* ---- voice ---- */
 
 export const synthesizeFn = createServerFn({ method: "POST" })
-  .inputValidator((d: { token: string; text: string; provider?: string }) => d)
+  .inputValidator((d: { token: string; text: string; provider?: string; language?: string }) => d)
   .handler(async ({ data: d }) => voice.synthesize(d));
 
 export const transcribeFn = createServerFn({ method: "POST" })
@@ -258,9 +258,7 @@ export const diagramSpecFn = createServerFn({ method: "POST" })
   );
 
 export const diagramImageFn = createServerFn({ method: "POST" })
-  .inputValidator(
-    (d: { token: string; question: string; answer: string; language: Language }) => d,
-  )
+  .inputValidator((d: { token: string; question: string; answer: string; language: Language }) => d)
   .handler(async ({ data: d }) =>
     diagramImage.generateDiagramImage(d.token, d.question, d.answer, d.language),
   );

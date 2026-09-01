@@ -1,11 +1,16 @@
 /**
- * 2D Classroom Stage — the composition layer that replaced the 3D renderer.
+ * 2D Classroom Stage — the composition layer.
  *
- * It owns the DOM layout of the classroom: a large scrolling board and the 2D
- * teacher standing beside it. It computes a real 16:9 / 9:16 (or viewport)
- * frame, lays the board and teacher out inside it WITHOUT overlap, and maps
- * board pen coordinates into stage space so the teacher's hand can follow the
- * writing exactly.
+ * It owns the DOM layout of the classroom: a LARGE scrolling board on top and
+ * a LARGE 2D teacher in a full-width teaching strip below it, with NO overlap
+ * (§2/§3/§46). The teacher strip spans the whole frame width so the figure can
+ * slide under any board position and its hand can reach the exact pen tip.
+ *
+ * Landscape (16:9): board ≈ 62% of the frame height across the full width
+ * (the majority of the workspace), teacher strip ≈ 34% below it.
+ * Portrait (9:16): board fills the upper/main area, the teacher sits in a
+ * compact but clearly visible strip below — no content is cropped and nothing
+ * overlaps.
  */
 import { BOARD_H, BOARD_W } from "./board";
 import { TEACHER_H, TEACHER_W } from "./teacher2d";
@@ -20,6 +25,52 @@ export type StageRects = {
 };
 
 const BOARD_ASPECT = BOARD_W / BOARD_H;
+
+/**
+ * Pure composition math — no DOM. Given a resolved frame size and ratio family,
+ * returns the board + teacher rects with ZERO overlap (§2/§3/§46):
+ * landscape → board on top (majority), full-width teacher strip below;
+ * portrait → board fills the upper/main area, compact teacher strip below.
+ */
+export function computeStageRects(fw: number, fh: number, ratio: RatioMode = "auto"): StageRects {
+  let w = Math.max(1, fw);
+  let h = Math.max(1, fh);
+  if (ratio === "16:9") {
+    if (w / h > 16 / 9) w = h * (16 / 9);
+    else h = w * (9 / 16);
+  } else if (ratio === "9:16") {
+    if (w / h > 9 / 16) w = h * (9 / 16);
+    else h = w * (16 / 9);
+  }
+  w = Math.round(w);
+  h = Math.round(h);
+  const portrait = w / h < 1;
+
+  const pad = Math.round(Math.min(w, h) * 0.012);
+  const availW = w - pad * 2;
+  const availH = h - pad * 2;
+
+  const boardH = portrait ? Math.round(availH * 0.56) : Math.round(availH * 0.6);
+  const boardW = Math.min(availW, Math.round(boardH * BOARD_ASPECT * 0.96));
+  const board = {
+    x: Math.round((w - boardW) / 2),
+    y: pad,
+    w: boardW,
+    h: boardH,
+  };
+
+  const teacherH = portrait
+    ? Math.round(Math.min(availH - boardH - pad * 2, availH * 0.4))
+    : Math.round(Math.min(availH - boardH - pad * 2, availH * 0.36));
+  const teacher = {
+    x: Math.round((w - availW) / 2),
+    y: Math.round(board.y + board.h + pad * 0.6),
+    w: availW,
+    h: teacherH,
+  };
+
+  return { frame: { x: 0, y: 0, w, h }, board, teacher, portrait };
+}
 
 export class Stage2D {
   readonly root: HTMLDivElement;
@@ -49,7 +100,7 @@ export class Stage2D {
 
     this.boardWrap = document.createElement("div");
     this.boardWrap.className = "ustad-stage-board";
-    this.boardWrap.style.cssText = "position:absolute;overflow:hidden;border-radius:14px;";
+    this.boardWrap.style.cssText = "position:absolute;overflow:hidden;border-radius:16px;";
     this.frameEl.appendChild(this.boardWrap);
 
     this.teacherWrap = document.createElement("div");
@@ -58,7 +109,11 @@ export class Stage2D {
     this.frameEl.appendChild(this.teacherWrap);
   }
 
-  mount(container: HTMLElement, boardCanvas: HTMLCanvasElement, teacherCanvas: HTMLCanvasElement): void {
+  mount(
+    container: HTMLElement,
+    boardCanvas: HTMLCanvasElement,
+    teacherCanvas: HTMLCanvasElement,
+  ): void {
     this.container = container;
     boardCanvas.style.cssText = "display:block;width:100%;height:100%;";
     teacherCanvas.style.cssText = "display:block;width:100%;height:100%;";
@@ -110,61 +165,12 @@ export class Stage2D {
     if (!el) return this.rects;
     const cw = Math.max(1, el.clientWidth);
     const ch = Math.max(1, el.clientHeight);
-
-    // 1. Solve the composed frame for the requested ratio family.
-    let fw = cw;
-    let fh = ch;
-    if (this.ratio === "16:9") {
-      if (cw / ch > 16 / 9) fw = ch * (16 / 9);
-      else fh = cw * (9 / 16);
-    } else if (this.ratio === "9:16") {
-      if (cw / ch > 9 / 16) fw = ch * (9 / 16);
-      else fh = cw * (16 / 9);
-    }
-    fw = Math.round(fw);
-    fh = Math.round(fh);
-    const portrait = fw / fh < 1;
-
-    // 2. Board is the hero: it is centred and fills the frame. The teacher is a
-    //    smaller figure standing in the bottom-left corner IN FRONT of the board
-    //    (below the writing area), so the board is never pushed to one side.
-    const pad = Math.round(Math.min(fw, fh) * 0.012);
-    const availW = fw - pad * 2;
-    const availH = fh - pad * 2;
-    let bw = availW;
-    let bh = bw / BOARD_ASPECT;
-    // Board height boost: allow the board to grow past its pure aspect height
-    // so the writing surface is taller (capped by the available frame height).
-    bh = Math.min(availH, bh * 1.18);
-    if (bh > availH) {
-      bh = availH;
-      bw = Math.min(availW, bh * BOARD_ASPECT);
-    }
-    const board = {
-      x: Math.round((fw - bw) / 2),
-      y: Math.round((fh - bh) / 2),
-      w: Math.round(bw),
-      h: Math.round(bh),
-    };
-
-    // Teacher: tall enough that the raised hand really reaches the board's top
-    // edge, still anchored at the board's bottom-left so writing stays visible.
-    const th = Math.min(bh * (portrait ? 0.66 : 0.82), fh * 0.88);
-    const tw = th * (TEACHER_W / TEACHER_H);
-    const gutter = board.x - pad; // free space left of the board
-    const teacher = {
-      x: Math.round(gutter >= tw ? board.x - tw - pad * 0.5 : board.x - tw * 0.22),
-      y: Math.round(Math.min(fh - th, board.y + bh - th * 0.98)),
-      w: Math.round(tw),
-      h: Math.round(th),
-    };
-
-
-    this.rects = { frame: { x: 0, y: 0, w: fw, h: fh }, board, teacher, portrait };
-    this.frameEl.style.width = `${fw}px`;
-    this.frameEl.style.height = `${fh}px`;
-    this.apply(this.boardWrap, board);
-    this.apply(this.teacherWrap, teacher);
+    const rects = computeStageRects(cw, ch, this.ratio);
+    this.rects = rects;
+    this.frameEl.style.width = `${rects.frame.w}px`;
+    this.frameEl.style.height = `${rects.frame.h}px`;
+    this.apply(this.boardWrap, rects.board);
+    this.apply(this.teacherWrap, rects.teacher);
     return this.rects;
   }
 

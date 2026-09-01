@@ -248,12 +248,12 @@ function ClassroomPage() {
       />
 
       <div className="flex-1 px-4 py-5 md:px-8">
-        <div className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[1fr_16rem]">
+        <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1fr_16rem]">
           {/* Stage */}
           <div>
             <div
               ref={wrapRef}
-              className="panel relative h-[52vh] min-h-[320px] overflow-hidden md:h-[62vh]"
+              className="panel relative h-[56vh] min-h-[360px] overflow-hidden md:h-[72vh] lg:h-[76vh]"
             >
               {booting ? (
                 <div className="absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
@@ -664,20 +664,22 @@ function ClassroomPage() {
               <p className="mb-2 flex items-center gap-2 text-xs tracking-widest text-muted-foreground uppercase">
                 <PaintBucket className="size-3.5" /> Board
               </p>
-              <div className="flex gap-1">
-                {(["chalkboard", "whiteboard", "blackboard"] as BoardTheme[]).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => withEngine((e) => e.setBoardTheme(t))}
-                    className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] capitalize ${
-                      state?.boardTheme === t
-                        ? "bg-accent text-accent-foreground"
-                        : "bg-secondary/60 text-muted-foreground"
-                    }`}
-                  >
-                    {t.replace("board", "")}
-                  </button>
-                ))}
+              <div className="grid grid-cols-4 gap-1">
+                {(["chalkboard", "whiteboard", "blackboard", "digital"] as BoardTheme[]).map(
+                  (t) => (
+                    <button
+                      key={t}
+                      onClick={() => withEngine((e) => e.setBoardTheme(t))}
+                      className={`rounded-lg px-1 py-1.5 text-[11px] capitalize ${
+                        state?.boardTheme === t
+                          ? "bg-accent text-accent-foreground"
+                          : "bg-secondary/60 text-muted-foreground"
+                      }`}
+                    >
+                      {t.replace("board", "")}
+                    </button>
+                  ),
+                )}
               </div>
               <input
                 type="range"
@@ -737,10 +739,18 @@ function ClassroomPage() {
                 />
               </div>
               <div className="mt-2 grid grid-cols-2 gap-1">
-                <Button size="sm" variant="secondary" onClick={() => withEngine((e) => e.undoStroke())}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => withEngine((e) => e.undoStroke())}
+                >
                   <Undo2 className="size-3.5" /> Undo
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => withEngine((e) => e.clearStrokes())}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => withEngine((e) => e.clearStrokes())}
+                >
                   <Eraser className="size-3.5" /> Clear
                 </Button>
               </div>

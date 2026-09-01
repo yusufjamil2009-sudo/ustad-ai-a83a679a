@@ -14,6 +14,12 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    server: {
+      // Allow the sandbox live-preview host (and any *.e2b.app preview) to reach
+      // the dev server. Production builds are unaffected.
+      host: "0.0.0.0",
+      allowedHosts: [".e2b.app"],
+    },
     plugins: [
       VitePWA({
         strategies: "generateSW",

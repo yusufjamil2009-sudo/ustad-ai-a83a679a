@@ -7,7 +7,18 @@
 export type CameraId = "teaching";
 
 export type TeacherAnimation =
-  "idle" | "stand" | "walk" | "sit" | "point" | "write" | "explain" | "wave";
+  | "idle"
+  | "stand"
+  | "walk"
+  | "sit"
+  | "point"
+  | "write"
+  | "explain"
+  | "wave"
+  | "highlight"
+  | "question"
+  | "emphasize"
+  | "answer";
 
 export type BoardOp =
   | {
@@ -26,6 +37,10 @@ export type BoardOp =
   /** target moves ONLY items whose text matches; absent = explicit move-all (§22) */
   | { op: "move"; dx: number; dy: number; target?: string }
   | { op: "resize"; scale: number }
+  /** semantic scroll — move the board viewport to a content offset (px) */
+  | { op: "scroll"; y: number }
+  /** semantic section clear — archive items overlapping the region, keep the rest */
+  | { op: "clear_section"; region?: [number, number, number, number] }
   | { op: "clear" }
   | { op: "update"; text: string }
   | { op: "diagram"; kind: DiagramKind; title?: string; data?: number[]; labels?: string[] };
@@ -61,7 +76,6 @@ export type DiagramKind =
   // universal
   | "cycle"
   | "generic";
-
 
 /**
  * Semantic teaching phase of a beat. The board is the primary teaching surface,
@@ -202,7 +216,8 @@ export function boardDurationSeconds(ops: BoardOp[] | undefined): number {
     else if (op.op === "diagram") ms += 4200;
     else if (op.op === "arrow") ms += 900;
     else if (op.op === "underline" || op.op === "circle" || op.op === "highlight") ms += 700;
-    else if (op.op === "erase" || op.op === "clear") ms += 500;
+    else if (op.op === "erase" || op.op === "clear" || op.op === "clear_section") ms += 500;
+    else if (op.op === "scroll") ms += 350;
   }
   return ms / 1000;
 }

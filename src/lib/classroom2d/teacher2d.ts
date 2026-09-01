@@ -1,23 +1,29 @@
 /**
- * 2D Teacher — a canvas-drawn teaching character that replaces the old 3D rig.
+ * 2D Teacher — a canvas-drawn teaching character.
  *
  * It keeps the SAME semantic API the timeline and orchestrator already use
  * (`play(animation)`, `walkTo(anchor)`, `lookAt`, `pointAt`, `writeAt`,
  * `setSpeaking`), so nothing above the renderer had to change. Everything is
- * drawn procedurally at 2x device resolution — no sprite sheets to load, no
- * assets that can 404, and the writing hand really tracks the board pen tip.
+ * drawn procedurally — no sprite sheets, no assets that can 404.
+ *
+ * §5/§6/§7/§43: the writing hand is solved EXACTLY onto the live board pen tip.
+ * The teacher canvas spans the full stage width (bottom teaching strip), the
+ * figure slides horizontally to follow the pen, and a 2-bone IK lands the hand
+ * precisely on the current stroke while visibly holding chalk / a marker / a
+ * stylus (matched to the board surface).
  */
 import type { TeacherAnimation } from "./types";
 
 export type StageAnchor = "board" | "center" | "left" | "right" | "desk";
+export type WritingTool = "chalk" | "marker" | "stylus";
 
-/** Normalised x position (0..1 of the stage) for each anchor. */
+/** Normalised x position (0..1 of the teacher strip) for each anchor. */
 const ANCHOR_X: Record<StageAnchor, number> = {
-  board: 0.2,
+  board: 0.5,
   center: 0.5,
   left: 0.22,
   right: 0.78,
-  desk: 0.86,
+  desk: 0.85,
 };
 
 const TAU = Math.PI * 2;
@@ -35,22 +41,26 @@ const KURTA_DARK = "#245349";
 const TROUSER = "#26313f";
 const SHOE = "#151b23";
 
-export type TeacherPalette = { kurta: string; kurtaDark: string };
-
-/** Logical drawing size of the teacher canvas. */
+/** Logical drawing size of the teacher figure. */
 export const TEACHER_W = 420;
 export const TEACHER_H = 760;
+
+/** Fixed shoulder pivot in figure-local space (used by BOTH solver and painter). */
+const SHOULDER_X = TEACHER_W / 2;
+const SHOULDER_Y = 306;
 
 export class Teacher2D {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
 
   animation: TeacherAnimation = "idle";
-  /** normalised stage x (0..1) the teacher currently stands at */
+  /** normalised strip x (0..1) the teacher currently stands at */
   x = ANCHOR_X.center;
   private targetX = ANCHOR_X.center;
   private anchor: StageAnchor = "center";
   facing: 1 | -1 = 1;
+
+  private tool: WritingTool = "chalk";
 
   private t = 0;
   private speaking = false;
@@ -59,7 +69,13 @@ export class Teacher2D {
   private penTarget: { u: number; v: number } | null = null;
   private pointTarget: { u: number; v: number } | null = null;
   private lookTarget: { u: number; v: number } | null = null;
-  /** smoothed arm state */
+  /** stage + teacher wrap rects (CSS px) for EXACT hand→pen mapping */
+  private frame = { w: 1, h: 1 };
+  private wrap = { x: 0, y: 0, w: 1, h: 1 };
+  private cssW = TEACHER_W;
+  private cssH = TEACHER_H;
+  private dpr = 1;
+  /** smoothed arm state (angle/reach kept for old poses; exact IK overrides) */
   private armAngle = 0.9;
   private armReach = 0.55;
   private blink = 0;
@@ -76,7 +92,6 @@ export class Teacher2D {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("2D canvas unavailable");
     this.ctx = ctx;
-    this.ctx.scale(2, 2);
   }
 
   /* ---------------- semantic API (unchanged for callers) ---------------- */
@@ -114,6 +129,32 @@ export class Teacher2D {
     if (!on) this.mouth = 0;
   }
 
+  /** Writing tool held by the hand — follows the board surface theme (§43). */
+  setTool(tool: WritingTool): void {
+    this.tool = tool;
+  }
+
+  get currentTool(): WritingTool {
+    return this.tool;
+  }
+
+  /**
+   * Feed the live stage geometry so the hand can land EXACTLY on the pen.
+   * Also resizes the canvas to the (full-width) teaching strip.
+   */
+  setStageRects(
+    frame: { w: number; h: number },
+    wrap: { x: number; y: number; w: number; h: number },
+  ): void {
+    this.frame = frame;
+    this.wrap = wrap;
+    this.cssW = Math.max(10, wrap.w);
+    this.cssH = Math.max(10, wrap.h);
+    this.dpr = clamp(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 1, 2);
+    this.canvas.width = Math.round(this.cssW * this.dpr);
+    this.canvas.height = Math.round(this.cssH * this.dpr);
+  }
+
   get currentAnchor(): StageAnchor {
     return this.anchor;
   }
@@ -133,15 +174,19 @@ export class Teacher2D {
 
   /* ---------------- frame ---------------- */
 
-  update(dt: number, stageAspect: number): void {
+  update(dt: number, _stageAspect: number): void {
     this.t += dt;
 
-    // walking
+    // walking (and, while writing on the board, sliding to follow the pen)
     if (Math.abs(this.targetX - this.x) > 0.004) {
       const dir = Math.sign(this.targetX - this.x);
       this.facing = dir >= 0 ? 1 : -1;
-      this.x = clamp(this.x + dir * dt * 0.55, Math.min(this.x, this.targetX), Math.max(this.x, this.targetX));
-      if (this.animation !== "write") this.animation = "walk";
+      this.x = clamp(
+        this.x + dir * dt * 0.55,
+        Math.min(this.x, this.targetX),
+        Math.max(this.x, this.targetX),
+      );
+      if (this.animation !== "write" && this.animation !== "point") this.animation = "walk";
     } else if (!this.arrived) {
       this.x = this.targetX;
       this.arrived = true;
@@ -149,26 +194,37 @@ export class Teacher2D {
       this.onArrive?.();
     }
 
-    // arm solve — the hand really points at the pen / point target
     const target = this.penTarget ?? this.pointTarget;
     if (target) {
-      // shoulder position in stage-normalised space
-      const sx = this.x;
-      const sy = 0.62;
-      const dx = (target.u - sx) * stageAspect;
-      const dy = target.v - sy;
+      // the teacher tracks the pen horizontally so the arm can always reach it
+      if (this.anchor === "board" && this.penTarget) {
+        const want = clamp(target.u, 0.12, 0.88);
+        this.x = damp(this.x, want, 6, dt);
+        this.facing = target.u >= this.x ? 1 : -1;
+      } else {
+        this.facing = target.u >= this.x ? 1 : -1;
+      }
+      // arm direction smoothing (kept for fallback poses)
+      const dx = target.u - this.x;
+      const dy = target.v - 0.62;
       const wanted = Math.atan2(dy, dx);
       this.armAngle = damp(this.armAngle, wanted, 9, dt);
       this.armReach = damp(this.armReach, clamp(Math.hypot(dx, dy) * 2.4, 0.45, 1), 8, dt);
-      this.facing = target.u >= this.x ? 1 : -1;
     } else {
-      const rest = this.animation === "explain" ? -0.5 : 0.85;
+      const rest =
+        this.animation === "explain" ||
+        this.animation === "emphasize" ||
+        this.animation === "answer"
+          ? -0.5
+          : 0.85;
       this.armAngle = damp(this.armAngle, rest, 6, dt);
       this.armReach = damp(this.armReach, 0.5, 6, dt);
     }
 
     // mouth / blink
-    this.mouth = this.speaking ? (Math.sin(this.t * 15) * 0.5 + 0.5) * 0.9 + 0.1 : damp(this.mouth, 0, 10, dt);
+    this.mouth = this.speaking
+      ? (Math.sin(this.t * 15) * 0.5 + 0.5) * 0.9 + 0.1
+      : damp(this.mouth, 0, 10, dt);
     this.nextBlink -= dt;
     if (this.nextBlink <= 0) {
       this.blink = 0.16;
@@ -179,14 +235,98 @@ export class Teacher2D {
     this.draw();
   }
 
+  /* ---------------- coordinate helpers ---------------- */
+
+  /** Stage-normalised target → CSS px within the teacher strip. */
+  private cssTarget(target: { u: number; v: number }): { x: number; y: number } {
+    return {
+      x: ((target.u * this.frame.w - this.wrap.x) / Math.max(1, this.wrap.w)) * this.cssW,
+      y: ((target.v * this.frame.h - this.wrap.y) / Math.max(1, this.wrap.h)) * this.cssH,
+    };
+  }
+
+  /** Figure-local coordinates (420×760 space) for a stage target. */
+  private localTarget(target: { u: number; v: number }): { x: number; y: number } {
+    const p = this.cssTarget(target);
+    const scale = this.figureScale();
+    const cx = this.x * this.cssW;
+    const footY = this.cssH;
+    const originX = cx - (TEACHER_W * scale) / 2;
+    return {
+      x: (p.x - originX) / scale,
+      y: TEACHER_H - (footY - p.y) / scale,
+    };
+  }
+
+  private figureScale(): number {
+    return (this.cssH * 0.94) / TEACHER_H;
+  }
+
+  /**
+   * 2-bone IK: shoulder → elbow → hand, with the hand landing EXACTLY at the
+   * pen position. The elbow bends outward from the body; arm segments stretch
+   * up to ~1.75× so high board content still reads as a real reach.
+   */
+  private solveArm(
+    sx: number,
+    sy: number,
+    tx: number,
+    ty: number,
+  ): { ex: number; ey: number; handX: number; handY: number } {
+    let dx = tx - sx;
+    let dy = ty - sy;
+    let d = Math.hypot(dx, dy);
+    const L1 = 74;
+    const L2 = 70;
+    const reachable = L1 + L2;
+    const stretch = clamp(d / reachable, 1, 1.75);
+    const l1 = L1 * stretch;
+    const l2 = L2 * stretch;
+    if (d < 1e-3) d = 1;
+    if (d > l1 + l2) {
+      dx *= (l1 + l2) / d;
+      dy *= (l1 + l2) / d;
+      d = l1 + l2;
+    }
+    const a = (l1 * l1 - l2 * l2 + d * d) / (2 * d);
+    const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+    const mx = sx + (dx * a) / d;
+    const my = sy + (dy * a) / d;
+    const side = this.facing;
+    const ex = mx - (dy / d) * h * side;
+    const ey = my + (dx / d) * h * side;
+    return { ex, ey, handX: sx + dx, handY: sy + dy };
+  }
+
   /* ---------------- drawing ---------------- */
 
   private draw(): void {
     const c = this.ctx;
-    const W = TEACHER_W;
-    const H = TEACHER_H;
+    const W = this.cssW;
+    const H = this.cssH;
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.clearRect(0, 0, W, H);
 
+    const scale = this.figureScale();
+    const cx = this.x * W;
+    const footY = H;
+
+    // draw the whole figure through one transform: feet at the strip bottom,
+    // centre of the figure at `cx` (slides across the full stage width)
+    c.save();
+    c.translate(cx, footY);
+    c.translate(-(TEACHER_W * scale) / 2, -TEACHER_H * scale);
+    c.scale(scale, scale);
+
+    this.paintFigure(c);
+
+    c.restore();
+  }
+
+  /** Paint the figure in 420×760 figure-local space. */
+  private paintFigure(c: CanvasRenderingContext2D): void {
+    const W = TEACHER_W;
+    const H = TEACHER_H;
     const a = this.animation;
     const bob = a === "walk" ? Math.abs(Math.sin(this.t * 8)) * 6 : Math.sin(this.t * 1.6) * 2.4;
     const sitting = a === "sit";
@@ -243,20 +383,32 @@ export class Teacher2D {
     c.stroke();
 
     // back arm (rest)
-    const backAngle = a === "wave" ? -1.1 : a === "explain" ? -0.6 : 0.9;
+    const backAngle = a === "wave" ? -1.1 : a === "explain" || a === "answer" ? -0.6 : 0.9;
     this.arm(cx - 54 * this.facing, shoulderY + 16, backAngle * -this.facing, 0.5, false);
 
-    // front arm — this is the one that writes / points / waves
-    let angle = this.armAngle;
-    let reach = this.armReach;
-    if (a === "wave") {
-      angle = -1.25 + Math.sin(this.t * 9) * 0.28;
-      reach = 0.75;
-    } else if (a === "explain" && !this.penTarget && !this.pointTarget) {
-      angle = -0.45 + Math.sin(this.t * 2.4) * 0.35;
-      reach = 0.62;
+    // FRONT arm — writes / points / waves. With a live pen/point target the
+    // hand is solved EXACTLY onto it (figure-local IK).
+    const active = this.penTarget ?? this.pointTarget;
+    if (active && (a === "write" || a === "point" || a === "highlight" || a === "emphasize")) {
+      const shoulder = { x: cx + 58 * this.facing, y: SHOULDER_Y };
+      const t = this.localTarget(active);
+      const ik = this.solveArm(shoulder.x, shoulder.y, t.x, t.y);
+      this.armIk(shoulder.x, shoulder.y, ik.ex, ik.ey, ik.handX, ik.handY, true);
+    } else {
+      let angle = this.armAngle;
+      let reach = this.armReach;
+      if (a === "wave") {
+        angle = -1.25 + Math.sin(this.t * 9) * 0.28;
+        reach = 0.75;
+      } else if (a === "question") {
+        angle = -1.35 + Math.sin(this.t * 3.2) * 0.12;
+        reach = 0.72;
+      } else if ((a === "explain" || a === "emphasize" || a === "answer") && !active) {
+        angle = -0.45 + Math.sin(this.t * 2.4) * 0.35;
+        reach = 0.62;
+      }
+      this.arm(cx + 54 * this.facing, shoulderY + 16, angle, reach, true);
     }
-    this.arm(cx + 54 * this.facing, shoulderY + 16, angle, reach, true);
 
     // head
     const tilt = this.lookTarget ? clamp((this.lookTarget.u - this.x) * 0.5, -0.28, 0.28) : 0;
@@ -311,12 +463,40 @@ export class Teacher2D {
     c.restore();
   }
 
-  /** Draw one arm as an upper + fore segment with a simple 2-bone solve. */
+  /** Draw the writing arm via the exact IK solution, with the held tool. */
+  private armIk(
+    sx: number,
+    sy: number,
+    ex: number,
+    ey: number,
+    hx: number,
+    hy: number,
+    front: boolean,
+  ): void {
+    const c = this.ctx;
+    c.strokeStyle = front ? KURTA : KURTA_DARK;
+    c.lineWidth = 26;
+    c.lineCap = "round";
+    c.beginPath();
+    c.moveTo(sx, sy);
+    c.quadraticCurveTo((sx + ex) / 2 + 10 * this.facing, (sy + ey) / 2 - 14, ex, ey);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(ex, ey);
+    c.quadraticCurveTo((ex + hx) / 2 + 6 * this.facing, (ey + hy) / 2 - 6, hx, hy);
+    c.stroke();
+    // hand
+    c.fillStyle = SKIN;
+    c.beginPath();
+    c.arc(hx, hy, 15, 0, TAU);
+    c.fill();
+    if (front) this.drawTool(hx, hy);
+  }
+
+  /** Old-style simple arm used for idle/wave/explain poses (no live target). */
   private arm(sx: number, sy: number, angle: number, reach: number, front: boolean): void {
     const c = this.ctx;
-    // The writing arm is longer so the hand can reach the top of the taller board.
     const len = (front ? 138 : 100) * (0.7 + reach * 0.55);
-
     const ex = sx + Math.cos(angle) * len * this.facing;
     const ey = sy + Math.sin(angle) * len;
     const bend = front ? 0.45 : -0.35;
@@ -334,15 +514,61 @@ export class Teacher2D {
     c.beginPath();
     c.arc(ex, ey, 15, 0, TAU);
     c.fill();
-    // chalk in the writing hand
-    if (front && this.penTarget) {
-      c.strokeStyle = "#f6f1e3";
-      c.lineWidth = 7;
-      c.beginPath();
-      c.moveTo(ex, ey);
-      c.lineTo(ex + Math.cos(angle) * 20 * this.facing, ey + Math.sin(angle) * 20);
-      c.stroke();
+    if (front && (this.animation === "write" || this.animation === "highlight")) {
+      this.drawTool(ex, ey);
     }
+  }
+
+  /** Draw the writing tool in the hand — chalk / marker / stylus (§6/§43). */
+  private drawTool(hx: number, hy: number): void {
+    const c = this.ctx;
+    const dir = this.facing;
+    c.save();
+    if (this.tool === "chalk") {
+      c.strokeStyle = "#f6f1e3";
+      c.lineWidth = 8;
+      c.lineCap = "round";
+      c.beginPath();
+      c.moveTo(hx - dir * 6, hy - 6);
+      c.lineTo(hx + dir * 22, hy - 12);
+      c.stroke();
+      c.fillStyle = "rgba(246,241,227,0.55)";
+      c.beginPath();
+      c.arc(hx + dir * 22, hy - 12, 4.5, 0, TAU);
+      c.fill();
+    } else if (this.tool === "marker") {
+      // dark barrel + coloured tip
+      c.strokeStyle = "#1f2937";
+      c.lineWidth = 7;
+      c.lineCap = "round";
+      c.beginPath();
+      c.moveTo(hx - dir * 8, hy - 5);
+      c.lineTo(hx + dir * 24, hy - 13);
+      c.stroke();
+      c.strokeStyle = "#f59e0b";
+      c.lineWidth = 5;
+      c.beginPath();
+      c.moveTo(hx + dir * 20, hy - 12);
+      c.lineTo(hx + dir * 32, hy - 15);
+      c.stroke();
+    } else {
+      // digital stylus — slim pen with a glowing tip
+      c.strokeStyle = "#cbd5e1";
+      c.lineWidth = 6;
+      c.lineCap = "round";
+      c.beginPath();
+      c.moveTo(hx - dir * 10, hy - 4);
+      c.lineTo(hx + dir * 26, hy - 14);
+      c.stroke();
+      c.fillStyle = "#4ade80";
+      c.shadowColor = "#4ade80";
+      c.shadowBlur = 8;
+      c.beginPath();
+      c.arc(hx + dir * 26, hy - 14, 3.6, 0, TAU);
+      c.fill();
+      c.shadowBlur = 0;
+    }
+    c.restore();
   }
 
   dispose(): void {

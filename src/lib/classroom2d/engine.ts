@@ -156,6 +156,8 @@ export class ClassroomEngine {
 
     // the timeline may not leave a beat while its board writing is unfinished
     this.timeline.isBoardBusy = () => this.board.busy;
+    // ...or while the authoritative voice controller still has a request in flight
+    this.timeline.isSpeechPending = () => this.audio.isSpeechPending;
 
     // voice input (student doubts)
     this.voice.onStart = () => this.state.set({ listening: true, transcript: "" });
@@ -201,6 +203,8 @@ export class ClassroomEngine {
       this.lastResize.h = h;
       const rects = this.stage.layout();
       this.board.setViewport(rects.board.w, rects.board.h, rects.portrait);
+      // feed the live geometry to the teacher so its hand can hit the exact pen
+      this.teacher.setStageRects(rects.frame, rects.teacher);
       this.state.set({ portrait: rects.portrait });
     };
     resize();
@@ -367,6 +371,24 @@ export class ClassroomEngine {
     this.audio.startAmbience();
     this.timeline.play();
     this.state.set({ playing: true, needsResume: false });
+    // Resume after pause: the beat's speech was stopped by pause(), so restart
+    // this beat's narration. The timeline's speech gate keeps the beat alive
+    // until the sentence actually completes — nothing gets cut off. (A fresh
+    // play that just landed on beat 0 already started speech inside applyStep,
+    // so `isSpeechPending` guards against a double-start.)
+    const step = this.timeline.step;
+    if (step?.say && !this.audio.isSpeechPending) {
+      this.pendingSay = null;
+      if (this.sayTimer !== null) {
+        window.clearTimeout(this.sayTimer);
+        this.sayTimer = null;
+      }
+      const spoken = mathify(step.say);
+      this.speakingToken = ++this.narrationToken;
+      this.lastTeacherSpeech = spoken;
+      this.state.bus.emit("say", { text: spoken });
+      this.audio.speak(spoken);
+    }
     this.persist();
   }
 
@@ -450,9 +472,17 @@ export class ClassroomEngine {
     this.teacher.lookAt(focus);
     this.teacher.pointAt(step.teacher === "point" ? focus : null);
 
-    // board ops (including this beat's semantic diagram)
-    if (!this.rebuilding) for (const op of this.opsFor(step)) this.board.apply(op);
-
+    // board ops (including this beat's semantic diagram). One failing op must
+    // never crash the classroom or destroy previously written content (§52).
+    if (!this.rebuilding) {
+      for (const op of this.opsFor(step)) {
+        try {
+          this.board.apply(op);
+        } catch (e) {
+          console.warn("board op skipped (preserving existing content):", op.op, e);
+        }
+      }
+    }
 
     /**
      * Narration is strictly bound to THIS beat: speech from the previous phase
@@ -496,7 +526,13 @@ export class ClassroomEngine {
     const upto = Math.max(0, Math.min(targetIndex, list.length - 1));
     for (let i = 0; i <= upto; i++) {
       const s = list[i]!;
-      for (const op of this.opsFor(s)) this.board.apply(op);
+      for (const op of this.opsFor(s)) {
+        try {
+          this.board.apply(op);
+        } catch (e) {
+          console.warn("board op skipped during replay:", op.op, e);
+        }
+      }
     }
   }
 
@@ -526,9 +562,17 @@ export class ClassroomEngine {
     this.state.set({ quality: q });
   }
 
-  /** Board surface theme — chalkboard / blackboard / whiteboard. */
+  /** Writing tool shown in the teacher's hand follows the board surface. */
+  private toolForTheme(theme: BoardTheme): "chalk" | "marker" | "stylus" {
+    if (theme === "whiteboard") return "marker";
+    if (theme === "digital") return "stylus";
+    return "chalk"; // chalkboard + blackboard
+  }
+
+  /** Board surface theme — chalkboard / blackboard / whiteboard / digital. */
   setBoardTheme(theme: BoardTheme): void {
     this.board?.setTheme(theme);
+    this.teacher?.setTool(this.toolForTheme(theme));
     this.state.set({ boardTheme: theme });
     this.persist();
   }
@@ -538,6 +582,7 @@ export class ClassroomEngine {
     this.stage.setRatio(mode);
     const rects = this.stage.layoutRects;
     this.board?.setViewport(rects.board.w, rects.board.h, rects.portrait);
+    this.teacher?.setStageRects(rects.frame, rects.teacher);
     this.state.set({ ratio: mode, portrait: rects.portrait });
   }
 
@@ -546,6 +591,7 @@ export class ClassroomEngine {
   /** Scroll the board viewport (0..1 of the written content). */
   setBoardScroll(progress: number): void {
     if (!this.board) return;
+    this.board.markManualScroll();
     const max = Math.max(0, this.board.contentHeight - this.board.surface.height);
     this.board.scrollTo(max * Math.min(1, Math.max(0, progress)));
   }
