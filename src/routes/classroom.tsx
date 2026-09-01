@@ -80,6 +80,9 @@ function ClassroomPage() {
   const [topic, setTopic] = useState("Photosynthesis");
   const [booting, setBooting] = useState(true);
   const [doubt, setDoubt] = useState("");
+  const [drawOn, setDrawOn] = useState(false);
+  const [penSize, setPenSize] = useState(8);
+  const [penColor, setPenColor] = useState("#ffffff");
   const [fullscreen, setFullscreen] = useState(false);
   const [speed, setSpeed] = useState(1);
   // Language engine: the saved preference drives board text, narration and voice input.
