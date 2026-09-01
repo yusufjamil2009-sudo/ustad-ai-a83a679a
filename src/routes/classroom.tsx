@@ -26,6 +26,12 @@ import {
   LogOut,
   Timer,
   Languages,
+  Pencil,
+  Undo2,
+  Eraser,
+  Download,
+  FileText,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/AppShell";
