@@ -148,8 +148,9 @@ export class Stage2D {
     // empty bottom margin of the board — never the live writing column.
     const th = Math.min(bh * (portrait ? 0.42 : 0.5), fh * 0.5);
     const tw = th * (TEACHER_W / TEACHER_H);
+    const gutter = board.x - pad; // free space left of the board
     const teacher = {
-      x: Math.round(board.x - tw * 0.16),
+      x: Math.round(gutter >= tw ? board.x - tw - pad * 0.5 : board.x - tw * 0.18),
       y: Math.round(Math.min(fh - th, board.y + bh - th * 0.92)),
       w: Math.round(tw),
       h: Math.round(th),
