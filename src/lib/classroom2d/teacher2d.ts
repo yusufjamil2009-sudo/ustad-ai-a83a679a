@@ -314,7 +314,9 @@ export class Teacher2D {
   /** Draw one arm as an upper + fore segment with a simple 2-bone solve. */
   private arm(sx: number, sy: number, angle: number, reach: number, front: boolean): void {
     const c = this.ctx;
-    const len = 96 * (0.7 + reach * 0.55);
+    // The writing arm is longer so the hand can reach the top of the taller board.
+    const len = (front ? 138 : 100) * (0.7 + reach * 0.55);
+
     const ex = sx + Math.cos(angle) * len * this.facing;
     const ey = sy + Math.sin(angle) * len;
     const bend = front ? 0.45 : -0.35;
