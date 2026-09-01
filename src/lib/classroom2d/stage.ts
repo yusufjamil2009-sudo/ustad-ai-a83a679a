@@ -125,42 +125,36 @@ export class Stage2D {
     fh = Math.round(fh);
     const portrait = fw / fh < 1;
 
-    // 2. Lay the board + teacher out with NO overlap.
-    const pad = Math.round(Math.min(fw, fh) * 0.025);
-    let board: StageRects["board"];
-    let teacher: StageRects["teacher"];
-
-    if (portrait) {
-      // Portrait: board on top (full width), teacher on a strip below it.
-      const bw = fw - pad * 2;
-      const bh = bw / BOARD_ASPECT;
-      board = { x: pad, y: pad, w: bw, h: bh };
-      const restH = Math.max(80, fh - bh - pad * 3);
-      const th = Math.min(restH, fh * 0.34);
-      const tw = th * (TEACHER_W / TEACHER_H);
-      teacher = { x: pad + bw * 0.06, y: pad * 2 + bh + (restH - th) / 2, w: tw, h: th };
-    } else {
-      // Landscape: teacher stands in a left column, board fills the rest.
-      const th = Math.min(fh - pad * 2, fh * 0.94);
-      const tw = th * (TEACHER_W / TEACHER_H);
-      const colW = Math.min(tw, fw * 0.22);
-      const bw = fw - colW - pad * 3;
-      const bh = Math.min(bw / BOARD_ASPECT, fh - pad * 2);
-      const realBw = bh * BOARD_ASPECT;
-      board = {
-        x: colW + pad * 2 + Math.max(0, (bw - realBw) / 2),
-        y: (fh - bh) / 2,
-        w: realBw,
-        h: bh,
-      };
-      const teacherH = Math.min(th, fh - pad * 2);
-      teacher = {
-        x: pad,
-        y: fh - teacherH - pad,
-        w: teacherH * (TEACHER_W / TEACHER_H),
-        h: teacherH,
-      };
+    // 2. Board is the hero: it is centred and fills the frame. The teacher is a
+    //    smaller figure standing in the bottom-left corner IN FRONT of the board
+    //    (below the writing area), so the board is never pushed to one side.
+    const pad = Math.round(Math.min(fw, fh) * 0.02);
+    const availW = fw - pad * 2;
+    const availH = fh - pad * 2;
+    let bw = availW;
+    let bh = bw / BOARD_ASPECT;
+    if (bh > availH) {
+      bh = availH;
+      bw = bh * BOARD_ASPECT;
     }
+    const board = {
+      x: Math.round((fw - bw) / 2),
+      y: Math.round((fh - bh) / 2),
+      w: Math.round(bw),
+      h: Math.round(bh),
+    };
+
+    // Teacher: compact, anchored to the board's bottom-left, overlapping only the
+    // empty bottom margin of the board — never the live writing column.
+    const th = Math.min(bh * (portrait ? 0.42 : 0.5), fh * 0.5);
+    const tw = th * (TEACHER_W / TEACHER_H);
+    const gutter = board.x - pad; // free space left of the board
+    const teacher = {
+      x: Math.round(gutter >= tw ? board.x - tw - pad * 0.5 : board.x - tw * 0.18),
+      y: Math.round(Math.min(fh - th, board.y + bh - th * 0.92)),
+      w: Math.round(tw),
+      h: Math.round(th),
+    };
 
     this.rects = { frame: { x: 0, y: 0, w: fw, h: fh }, board, teacher, portrait };
     this.frameEl.style.width = `${fw}px`;

@@ -607,6 +607,13 @@ export function mathify(raw: string): string {
   return s.replace(/\s{2,}/g, " ").trim();
 }
 
+/** A freehand chalk stroke drawn by the student/teacher with a pointer. */
+type FreeStroke = {
+  points: Array<[number, number, number]>;
+  color: string;
+  size: number;
+};
+
 export class BoardEngine {
   /** The live 2D writing surface. Mounted straight into the DOM by the stage. */
   readonly canvas: HTMLCanvasElement;
@@ -623,6 +630,12 @@ export class BoardEngine {
   private nextId = 1;
   private nextZ = 1;
   private dirty = true;
+  /** freehand drawing state (mouse / touch / stylus) */
+  private drawMode = false;
+  private penSize = 8;
+  private penColor = "#ffffff";
+  private strokes: FreeStroke[] = [];
+  private live: FreeStroke | null = null;
   /** repaint accumulator for the 30 Hz animation cadence */
   private paintAcc = 0;
   onChalk?: () => void;

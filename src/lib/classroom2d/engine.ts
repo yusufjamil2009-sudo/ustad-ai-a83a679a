@@ -94,6 +94,7 @@ export class ClassroomEngine {
   private clock = 0;
   private disposed = false;
   private ro: ResizeObserver | null = null;
+  private detachBoardInput: (() => void) | null = null;
   private hudBucket = -1;
   private lastResize = { w: -1, h: -1 };
   private plan: LessonPlan | null = null;
@@ -149,6 +150,9 @@ export class ClassroomEngine {
     this.teacher.onArrive = () => {
       if (this.board.busy) this.teacher.play("write");
     };
+
+    // real mouse / touch / stylus interaction on the board (draw + scroll)
+    this.detachBoardInput = this.board.attachInput();
 
     // the timeline may not leave a beat while its board writing is unfinished
     this.timeline.isBoardBusy = () => this.board.busy;
@@ -552,6 +556,46 @@ export class ClassroomEngine {
     this.board.scrollTo(this.board.scroll + px);
   }
 
+  /* ---------------- freehand drawing on the board ---------------- */
+
+  setDrawMode(on: boolean): void {
+    this.board?.setDrawMode(on);
+  }
+
+  get drawMode(): boolean {
+    return this.board?.drawing ?? false;
+  }
+
+  setPenSize(px: number): void {
+    this.board?.setPenSize(px);
+  }
+
+  setPenColor(color: string): void {
+    this.board?.setPenColor(color);
+  }
+
+  undoStroke(): void {
+    this.board?.undoStroke();
+  }
+
+  clearStrokes(): void {
+    this.board?.clearStrokes();
+  }
+
+  /* ---------------- board export (PNG / PDF notes) ---------------- */
+
+  async exportBoardPNG(): Promise<void> {
+    if (!this.board) throw new Error("Board is not ready yet.");
+    const { downloadBoardPng } = await import("./export");
+    await downloadBoardPng(this.board.exportImageCanvas(), this.state.get().topic || "ustad-board");
+  }
+
+  async exportBoardPDF(): Promise<void> {
+    if (!this.board) throw new Error("Board is not ready yet.");
+    const { downloadBoardPdf } = await import("./export");
+    await downloadBoardPdf(this.board.exportPages(), this.state.get().topic || "ustad-board");
+  }
+
   /* ---------------- focus (2D emphasis, no camera) ---------------- */
 
   focusTeacher(): void {
@@ -883,6 +927,8 @@ export class ClassroomEngine {
     cancelAnimationFrame(this.raf);
     this.ro?.disconnect();
     this.ro = null;
+    this.detachBoardInput?.();
+    this.detachBoardInput = null;
     this.audio.dispose();
     this.voice.dispose();
     try {
