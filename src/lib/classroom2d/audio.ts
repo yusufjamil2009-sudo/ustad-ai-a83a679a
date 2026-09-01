@@ -53,54 +53,19 @@ export class AudioEngine {
     return this.speechUnavailable;
   }
 
-  /** Procedural SFX so no external assets are required. */
-  sfx(kind: "chalk" | "pop" | "chime" | "ambience"): void {
-    if (this.muted) return;
-    const ctx = this.ensureCtx();
-    if (!ctx) return;
-    if (kind === "ambience") return this.startAmbience();
-
-    const now = ctx.currentTime;
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-
-    if (kind === "chalk") {
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.28, ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) * 0.35;
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      const filter = ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = 2600;
-      src.connect(filter).connect(gain);
-      gain.gain.value = 0.25;
-      src.start(now);
-    } else {
-      const osc = ctx.createOscillator();
-      osc.type = kind === "chime" ? "sine" : "triangle";
-      osc.frequency.setValueAtTime(kind === "chime" ? 880 : 420, now);
-      osc.frequency.exponentialRampToValueAtTime(kind === "chime" ? 1320 : 180, now + 0.22);
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
-      osc.connect(gain);
-      osc.start(now);
-      osc.stop(now + 0.36);
-    }
+  /**
+   * Classroom audio policy: the teacher's VOICE is the only sound. Chalk,
+   * pops, chimes and room ambience are intentionally silent so nothing
+   * competes with the narration.
+   */
+  sfx(_kind: "chalk" | "pop" | "chime" | "ambience"): void {
+    void _kind;
   }
 
   startAmbience(): void {
-    const ctx = this.ensureCtx();
-    if (!ctx || this.ambience) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = 62;
-    gain.gain.value = this.muted ? 0 : 0.012;
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    this.ambience = { osc, gain };
+    /* silent by design — voice only */
   }
+
 
   private preferredLang = "en-IN";
   /**

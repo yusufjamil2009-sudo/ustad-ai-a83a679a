@@ -126,7 +126,7 @@ export class ClassroomEngine {
     this.teacher = new Teacher2D();
     this.stage.mount(container, this.board.canvas, this.teacher.canvas);
 
-    this.board.onChalk = () => this.audio.sfx("chalk");
+    // Voice-only classroom: chalk strokes make no sound.
 
     /**
      * The board's live pen tip drives the teacher's hand every frame, so the
@@ -453,7 +453,6 @@ export class ClassroomEngine {
     // board ops (including this beat's semantic diagram)
     if (!this.rebuilding) for (const op of this.opsFor(step)) this.board.apply(op);
 
-    if (step.sfx) this.audio.sfx(step.sfx);
 
     /**
      * Narration is strictly bound to THIS beat: speech from the previous phase
@@ -479,7 +478,7 @@ export class ClassroomEngine {
       );
       if (!writes) this.flushPendingSay();
       // FAIL-SAFE ONLY: narration normally starts on the FIRST chalk stroke.
-      else this.sayTimer = window.setTimeout(() => this.flushPendingSay(), 220);
+      else this.sayTimer = window.setTimeout(() => this.flushPendingSay(), 80);
     }
     this.state.set({ stepIndex: index, teacher: this.teacher.animation });
     this.state.bus.emit("step", { index, total: this.timeline.total });

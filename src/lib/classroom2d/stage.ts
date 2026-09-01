@@ -128,14 +128,17 @@ export class Stage2D {
     // 2. Board is the hero: it is centred and fills the frame. The teacher is a
     //    smaller figure standing in the bottom-left corner IN FRONT of the board
     //    (below the writing area), so the board is never pushed to one side.
-    const pad = Math.round(Math.min(fw, fh) * 0.02);
+    const pad = Math.round(Math.min(fw, fh) * 0.012);
     const availW = fw - pad * 2;
     const availH = fh - pad * 2;
     let bw = availW;
     let bh = bw / BOARD_ASPECT;
+    // Board height boost: allow the board to grow past its pure aspect height
+    // so the writing surface is taller (capped by the available frame height).
+    bh = Math.min(availH, bh * 1.18);
     if (bh > availH) {
       bh = availH;
-      bw = bh * BOARD_ASPECT;
+      bw = Math.min(availW, bh * BOARD_ASPECT);
     }
     const board = {
       x: Math.round((fw - bw) / 2),
@@ -144,17 +147,18 @@ export class Stage2D {
       h: Math.round(bh),
     };
 
-    // Teacher: compact, anchored to the board's bottom-left, overlapping only the
-    // empty bottom margin of the board — never the live writing column.
-    const th = Math.min(bh * (portrait ? 0.42 : 0.5), fh * 0.5);
+    // Teacher: tall enough that the raised hand really reaches the board's top
+    // edge, still anchored at the board's bottom-left so writing stays visible.
+    const th = Math.min(bh * (portrait ? 0.66 : 0.82), fh * 0.88);
     const tw = th * (TEACHER_W / TEACHER_H);
     const gutter = board.x - pad; // free space left of the board
     const teacher = {
-      x: Math.round(gutter >= tw ? board.x - tw - pad * 0.5 : board.x - tw * 0.18),
-      y: Math.round(Math.min(fh - th, board.y + bh - th * 0.92)),
+      x: Math.round(gutter >= tw ? board.x - tw - pad * 0.5 : board.x - tw * 0.22),
+      y: Math.round(Math.min(fh - th, board.y + bh - th * 0.98)),
       w: Math.round(tw),
       h: Math.round(th),
     };
+
 
     this.rects = { frame: { x: 0, y: 0, w: fw, h: fh }, board, teacher, portrait };
     this.frameEl.style.width = `${fw}px`;
