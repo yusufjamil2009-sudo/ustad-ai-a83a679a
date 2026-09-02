@@ -324,7 +324,7 @@ function ClassroomPage() {
                 ) : null}
               </div>
 
-              <div className="absolute top-3 left-3 flex gap-1">
+              <div className="absolute top-3 left-3 z-20 flex gap-1">
                 <Button
                   size="sm"
                   variant="secondary"
