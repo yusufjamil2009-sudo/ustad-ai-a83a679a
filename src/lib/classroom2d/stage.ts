@@ -105,17 +105,21 @@ export class Stage2D {
   constructor() {
     this.root = document.createElement("div");
     this.root.className = "ustad-stage";
+    // pointer-events:none on the stage/frame so the React overlay controls
+    // (ratio switch, fullscreen, chips) stay clickable; only the board surface
+    // itself opts back in for freehand drawing/scrolling.
     this.root.style.cssText =
-      "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;";
+      "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;";
 
     this.frameEl = document.createElement("div");
     this.frameEl.className = "ustad-stage-frame";
-    this.frameEl.style.cssText = "position:relative;overflow:hidden;";
+    this.frameEl.style.cssText = "position:relative;overflow:hidden;pointer-events:none;";
     this.root.appendChild(this.frameEl);
 
     this.boardWrap = document.createElement("div");
     this.boardWrap.className = "ustad-stage-board";
-    this.boardWrap.style.cssText = "position:absolute;overflow:hidden;border-radius:16px;";
+    this.boardWrap.style.cssText =
+      "position:absolute;overflow:hidden;border-radius:16px;pointer-events:auto;";
     this.frameEl.appendChild(this.boardWrap);
 
     this.teacherWrap = document.createElement("div");
