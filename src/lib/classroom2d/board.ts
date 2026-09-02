@@ -39,6 +39,13 @@ const BAND_STEP = Math.round(BOARD_H * 0.62);
 const SCROLL_K = 6;
 
 /**
+ * Progressive-highlight sweep (§15): once the target text is FULLY written,
+ * the highlight fill grows left→right over this duration. Kept short so the
+ * teaching rhythm never stalls, long enough to read as a real action.
+ */
+const HL_MS = 650;
+
+/**
  * AUTHORITATIVE typography metric (§7). Layout, collision, snapshot sizing,
  * underline geometry and the pen-tip tracker ALL use this one function — there
  * is no second line-height calculation anywhere in the board engine.
@@ -209,6 +216,7 @@ export type BoardSnapshot = {
         }
       | undefined;
     highlight?: boolean;
+    hlReveal?: number;
     underline?: boolean;
     circled?: boolean;
     hasMath?: boolean;
@@ -232,7 +240,11 @@ type Region = { name: string; x: number; y: number; w: number; h: number };
  */
 const REGIONS: Record<string, Region> = {
   title: { name: "title", x: 120, y: 66, w: 2300, h: 150 },
-  concept: { name: "concept", x: 120, y: 250, w: 1240, h: 480 },
+  // CONCEPT is FULL board width by default (Bug: text was locked to the left
+  // half — x:120..1360 — while the right column stayed permanently empty in
+  // text-only phases). The effective width is narrowed ONLY when a diagram
+  // actually occupies the current band (see conceptWidth/reflow below).
+  concept: { name: "concept", x: 120, y: 250, w: 2320, h: 480 },
   formula: { name: "formula", x: 120, y: 758, w: 600, h: 190 },
   diagram: { name: "diagram", x: 1440, y: 250, w: 980, h: 698 },
   example: { name: "example", x: 760, y: 758, w: 600, h: 190 },
@@ -266,6 +278,8 @@ type Item = {
   color: string;
   language: "hi" | "en" | "mixed";
   highlight?: boolean;
+  /** 0..1 progressive highlight sweep — starts ONLY after the item is fully written */
+  hlReveal?: number;
   underline?: boolean;
   circled?: boolean;
   points?: [number, number][];
@@ -717,7 +731,7 @@ export class BoardEngine {
 
   /** True while any element is still being written/drawn — gates the timeline. */
   get busy(): boolean {
-    return this.items.some((i) => i.reveal < 1);
+    return this.items.some((i) => i.reveal < 1 || (i.highlight && (i.hlReveal ?? 1) < 1));
   }
 
   /**
@@ -1055,7 +1069,9 @@ export class BoardEngine {
     h: number,
   ): { x: number; y: number; region: string } | null {
     for (const name of ROLE_REGION[role]) {
-      const r = REGIONS[name];
+      // Concept placement follows the content-aware width (full board unless a
+      // diagram occupies this band) so text-only phases never waste the right half.
+      const r = name === "concept" ? this.effectiveConceptRegion() : REGIONS[name];
       if (!r) continue;
       const top = r.y + this.bandY;
       const stepY = 12;
@@ -1122,6 +1138,73 @@ export class BoardEngine {
     if (userAway && !nearBottom) return;
     if (bottom > this.scrollTargetY + H) this.scrollTo(bottom - H);
     else if (top < this.scrollTargetY) this.scrollTo(top);
+  }
+
+  /**
+   * CONTENT-AWARE CONCEPT WIDTH (§1/§2/§25/§26). Concept text uses the FULL
+   * safe board width by default — never half the board. It narrows to the
+   * space LEFT of the diagram column ONLY while a diagram actually occupies
+   * the current writing band, so a reserved right area is created exactly
+   * when content needs it and vanishes otherwise.
+   */
+  private conceptWidth(): number {
+    const c = REGIONS["concept"]!;
+    const d = REGIONS["diagram"]!;
+    const onBand = this.items.some(
+      (i) => i.role === "diagram" && i.y >= this.bandY - 40 && i.y < this.bandY + BAND_STEP,
+    );
+    return onBand ? d.x - c.x - PAD : c.w;
+  }
+
+  /** Effective concept region for placement — same content-aware rule. */
+  private effectiveConceptRegion(): Region {
+    const c = REGIONS["concept"]!;
+    return { ...c, w: this.conceptWidth() };
+  }
+
+  /**
+   * DYNAMIC DIAGRAM ARRIVAL (§3/§25). When a diagram op lands on a band that
+   * already holds full-width concept text, re-wrap that text into the left
+   * column so the diagram can sit beside it (CASE B) instead of spilling over
+   * it. Nothing is erased, no character is lost — the SAME text is simply
+   * re-flowed at the narrower width, restacked in its original order. If the
+   * re-flowed stack cannot fit the concept column, the band is left untouched
+   * and the diagram takes a fresh band below (still safe, never overlapping).
+   */
+  private reflowConceptForDiagram(): void {
+    const c = REGIONS["concept"]!;
+    const d = REGIONS["diagram"]!;
+    const leftW = d.x - c.x - PAD;
+    const bandTop = this.bandY;
+    const bandItems = this.items
+      .filter(
+        (i) =>
+          i.kind === "text" &&
+          i.role === "concept" &&
+          i.y >= bandTop - 20 &&
+          i.y < bandTop + BAND_STEP,
+      )
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    if (!bandItems.length) return;
+    const startY = bandItems[0]!.y;
+    const plan = bandItems.map((it) => {
+      const text = it.text ?? it.lines?.join(" ") ?? "";
+      const { lines, size } = this.layoutText(text, it.size ?? this.minSize, leftW - 20, c.h - 20);
+      return { it, lines, size, h: lines.length * lineH(size) + 16 };
+    });
+    const bottom = startY + plan.reduce((a, p) => a + p.h + 8, 0);
+    if (bottom > c.y + c.h) return; // won't fit the column — diagram takes a fresh band
+    let y = startY;
+    for (const p of plan) {
+      p.it.lines = p.lines;
+      p.it.size = p.size;
+      p.it.w = this.measure(p.lines, p.size) + 24;
+      p.it.h = p.h;
+      p.it.x = c.x;
+      p.it.y = y;
+      y += p.h + 8;
+    }
+    this.dirty = true;
   }
 
   /**
@@ -1255,8 +1338,11 @@ export class BoardEngine {
     protect: readonly Item[] = [],
   ): void {
     const region = REGIONS[ROLE_REGION[role][0] ?? "concept"]!;
+    // Concept text measures against the CONTENT-AWARE width — full board when
+    // no diagram is on the band, left column only when one is (CASE A vs B/C).
+    const layoutW = region.name === "concept" ? this.conceptWidth() - 40 : region.w - 40;
     const layout = (): { lines: string[]; size: number; fits: boolean } =>
-      this.layoutText(text, size, region.w - 40, region.h - 20);
+      this.layoutText(text, size, layoutW, region.h - 20);
     let fitted = layout();
     if (!fitted.fits) {
       fitted = layout();
@@ -1300,7 +1386,7 @@ export class BoardEngine {
       const fits = this.layoutText(
         candidate,
         this.minSize,
-        REGIONS["concept"]!.w - 40,
+        this.conceptWidth() - 40,
         REGIONS["concept"]!.h - 20,
       ).fits;
       if (current && !fits) {
@@ -1352,10 +1438,11 @@ export class BoardEngine {
         if (last && last.size) {
           const text = mathify(op.text);
           const region = REGIONS[last.region];
+          const updW = last.region === "concept" ? this.conceptWidth() : (region?.w ?? 1240);
           const { lines, size: fittedSize } = this.layoutText(
             text,
             last.size,
-            (region?.w ?? 1240) - 40,
+            updW - 40,
             (region?.h ?? 370) - 20,
           );
           last.text = text;
@@ -1372,7 +1459,13 @@ export class BoardEngine {
       case "highlight": {
         const t =
           this.items.find((i) => i.kind === "text" && i.text === op.text) ?? this.lastText();
-        if (t) t.highlight = true;
+        // The highlight is a REAL teaching action: it starts the sweep from 0
+        // and only becomes visible once the target has finished being written
+        // (paint gates on reveal >= 1; update() animates hlReveal 0→1).
+        if (t) {
+          t.highlight = true;
+          t.hlReveal = 0;
+        }
         break;
       }
       case "underline": {
@@ -1435,6 +1528,10 @@ export class BoardEngine {
         break;
       }
       case "diagram": {
+        // Content-aware layout: if this band already holds full-width concept
+        // text, re-flow it into the left column FIRST so the diagram can sit
+        // beside the explanation instead of overlapping it (§3 CASE B).
+        this.reflowConceptForDiagram();
         // §16: the declared box is the REAL rendered size (shapes + labels +
         // title), capped to the diagram region; paint scales to fit it exactly.
         const intrinsic = diagramIntrinsicSize(this.ctx, op.kind, op.title, op.data, op.labels);
@@ -1550,7 +1647,7 @@ export class BoardEngine {
         ...(i.to ? { to: i.to } : {}),
         ...(i.from ? { from: i.from } : {}),
         ...(i.diagram ? { diagram: i.diagram } : {}),
-        ...(i.highlight ? { highlight: true } : {}),
+        ...(i.highlight ? { highlight: true, hlReveal: i.hlReveal ?? 1 } : {}),
         ...(i.underline ? { underline: true } : {}),
         ...(i.circled ? { circled: true } : {}),
         ...(i.math ? { hasMath: true } : {}),
@@ -1603,7 +1700,7 @@ export class BoardEngine {
         ...(it.to ? { to: it.to } : {}),
         ...(it.from ? { from: it.from } : {}),
         ...(it.diagram ? { diagram: it.diagram } : {}),
-        ...(it.highlight ? { highlight: true } : {}),
+        ...(it.highlight ? { highlight: true, hlReveal: it.hlReveal ?? 1 } : {}),
         ...(it.underline ? { underline: true } : {}),
         ...(it.circled ? { circled: true } : {}),
       };
@@ -1686,6 +1783,14 @@ export class BoardEngine {
     this.wasBusy = Boolean(pending);
 
     for (const i of this.items) if (i.reveal < 1 && i !== pending) animating = true;
+    // Progressive highlight sweep: begins ONLY after the target has been fully
+    // written (reveal >= 1) — WRITE → WRITE COMPLETE → HIGHLIGHT (§12/§15).
+    for (const i of this.items) {
+      if (i.highlight && i.reveal >= 1 && (i.hlReveal ?? 1) < 1) {
+        i.hlReveal = Math.min(1, (i.hlReveal ?? 0) + dt / (HL_MS / 1000));
+        animating = true;
+      }
+    }
     if (this.dirty) {
       // one-shot ops (write/clear/restore/viewport) repaint immediately
       this.paint();
@@ -1804,9 +1909,16 @@ export class BoardEngine {
         const lh = size * 1.32;
         const total = i.lines.join("").length || 1;
         let shownChars = Math.ceil(total * i.reveal);
-        if (i.highlight) {
+        // Highlight is a POST-WRITE action (§12/§15): it is drawn only once the
+        // text is fully written, then sweeps left→right (hlReveal 0→1). The
+        // final highlighted state is never revealed before the writing action.
+        if (i.highlight && i.reveal >= 1) {
+          const hr = i.hlReveal ?? 1;
+          c.save();
+          c.globalAlpha = 0.25 + 0.75 * hr;
           c.fillStyle = PAL.hlFill;
-          c.fillRect(-12, -8, i.w + 12, i.h);
+          c.fillRect(-12, -8, (i.w + 12) * hr, i.h);
+          c.restore();
         }
         c.fillStyle = ink(i.color);
         c.font = `600 ${size}px ${FONT_STACK}`;
@@ -1840,6 +1952,15 @@ export class BoardEngine {
         }
       } else if (i.kind === "math" && i.math) {
         c.textBaseline = "alphabetic";
+        // Formula highlight follows the same post-write rule as text (§16).
+        if (i.highlight && i.reveal >= 1) {
+          const hr = i.hlReveal ?? 1;
+          c.save();
+          c.globalAlpha = 0.25 + 0.75 * hr;
+          c.fillStyle = PAL.hlFill;
+          c.fillRect(-12, -8, (i.w + 12) * hr, i.h);
+          c.restore();
+        }
         /**
          * Progressive formula writing: the typesetter consumes an ink budget in
          * real writing order (numerator → bar → denominator, radical → body,

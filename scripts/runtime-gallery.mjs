@@ -968,24 +968,27 @@ try {
   // Large-ZIP verification through the PRODUCTION streaming builder (the same
   // code path the UI uses for big downloads): two real ~535 KB PNG entries,
   // tee() + incremental CRC + CompressionStream, no full-size buffer concat.
-  const zipOut = await page.evaluate(async (b64s) => {
-    const b64ToBlob = (b64) => {
-      const bin = atob(b64);
-      const u8 = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      return new Blob([u8], { type: "image/png" });
-    };
-    const { buildZip } = await import("/src/lib/gallery-client.ts");
-    const blob = await buildZip(
-      b64s.map((b64, i) => ({ name: `noise-${i}.png`, blob: b64ToBlob(b64) })),
-    );
-    const back = new Uint8Array(await blob.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < back.length; i += 0x8000) {
-      bin += String.fromCharCode(...back.subarray(i, i + 0x8000));
-    }
-    return { b64: btoa(bin), size: back.length };
-  }, [noiseBuf.toString("base64"), noiseBuf.toString("base64")]);
+  const zipOut = await page.evaluate(
+    async (b64s) => {
+      const b64ToBlob = (b64) => {
+        const bin = atob(b64);
+        const u8 = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        return new Blob([u8], { type: "image/png" });
+      };
+      const { buildZip } = await import("/src/lib/gallery-client.ts");
+      const blob = await buildZip(
+        b64s.map((b64, i) => ({ name: `noise-${i}.png`, blob: b64ToBlob(b64) })),
+      );
+      const back = new Uint8Array(await blob.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < back.length; i += 0x8000) {
+        bin += String.fromCharCode(...back.subarray(i, i + 0x8000));
+      }
+      return { b64: btoa(bin), size: back.length };
+    },
+    [noiseBuf.toString("base64"), noiseBuf.toString("base64")],
+  );
   const zipLarge = parseZip(Buffer.from(zipOut.b64, "base64"));
   check(
     "S9 — large ZIP (2 × ~535 KB real PNGs) built via the streaming builder",
@@ -994,7 +997,7 @@ try {
   );
   check(
     "S9 — large ZIP entries inflate and CRC-32 matches (streaming path intact)",
-    Object.entries(zipLarge).every(([n, e]) => crc32(e.data) === (e.crc >>> 0)),
+    Object.entries(zipLarge).every(([n, e]) => crc32(e.data) === e.crc >>> 0),
     "CRC verified",
   );
   // browser stays responsive after the heavy build: a quick round-trip completes fast
