@@ -289,7 +289,7 @@ function ClassroomPage() {
                 </div>
               ) : null}
 
-              <div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-1">
+              <div className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col items-end gap-1">
                 <div className="rounded-lg bg-background/70 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur">
                   {state?.fps ?? 0} fps · {state?.quality ?? "…"} ·{" "}
                   {state?.portrait ? "9:16" : "16:9"}
