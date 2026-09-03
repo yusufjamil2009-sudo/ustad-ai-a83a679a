@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      achievement_audit: {
+        Row: {
+          achievement_id: string | null
+          action: string
+          created_at: string
+          detail: Json
+          engine_version: string
+          guest_id: string
+          id: string
+          reason: string
+          source_event_id: string | null
+          source_match_id: string | null
+        }
+        Insert: {
+          achievement_id?: string | null
+          action: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          guest_id: string
+          id?: string
+          reason?: string
+          source_event_id?: string | null
+          source_match_id?: string | null
+        }
+        Update: {
+          achievement_id?: string | null
+          action?: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          guest_id?: string
+          id?: string
+          reason?: string
+          source_event_id?: string | null
+          source_match_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "achievement_audit_achievement_id_fkey"
+            columns: ["achievement_id"]
+            isOneToOne: false
+            referencedRelation: "ustad_achievements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "achievement_audit_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       api_configs: {
         Row: {
           config: Json
@@ -121,6 +175,78 @@ export type Database = {
           },
         ]
       }
+      certificate_audit: {
+        Row: {
+          action: string
+          certificate_id: string
+          created_at: string
+          detail: Json
+          engine_version: string
+          guest_id: string | null
+          id: string
+          reason: string
+        }
+        Insert: {
+          action: string
+          certificate_id: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          guest_id?: string | null
+          id?: string
+          reason?: string
+        }
+        Update: {
+          action?: string
+          certificate_id?: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          guest_id?: string | null
+          id?: string
+          reason?: string
+        }
+        Relationships: []
+      }
+      certificate_templates: {
+        Row: {
+          active: boolean
+          certificate_type: string
+          code: string
+          created_at: string
+          event_id: string | null
+          id: string
+          subtitle: string
+          theme: Json
+          title: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          certificate_type: string
+          code: string
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          subtitle?: string
+          theme?: Json
+          title: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          certificate_type?: string
+          code?: string
+          created_at?: string
+          event_id?: string | null
+          id?: string
+          subtitle?: string
+          theme?: Json
+          title?: string
+          version?: number
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
           created_at: string
@@ -149,6 +275,539 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "conversations_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_attempt_questions: {
+        Row: {
+          answered_at: string | null
+          answered_index: number | null
+          attempt_id: string
+          category: string
+          correct_index: number
+          created_at: string
+          difficulty: string
+          explanation: string
+          fifty_removed: Json | null
+          guest_id: string
+          hint: string
+          hint_shown: boolean
+          id: string
+          options: Json
+          question: string
+          question_number: number
+          was_correct: boolean | null
+          was_skipped: boolean
+        }
+        Insert: {
+          answered_at?: string | null
+          answered_index?: number | null
+          attempt_id: string
+          category?: string
+          correct_index: number
+          created_at?: string
+          difficulty?: string
+          explanation?: string
+          fifty_removed?: Json | null
+          guest_id: string
+          hint?: string
+          hint_shown?: boolean
+          id?: string
+          options: Json
+          question: string
+          question_number: number
+          was_correct?: boolean | null
+          was_skipped?: boolean
+        }
+        Update: {
+          answered_at?: string | null
+          answered_index?: number | null
+          attempt_id?: string
+          category?: string
+          correct_index?: number
+          created_at?: string
+          difficulty?: string
+          explanation?: string
+          fifty_removed?: Json | null
+          guest_id?: string
+          hint?: string
+          hint_shown?: boolean
+          id?: string
+          options?: Json
+          question?: string
+          question_number?: number
+          was_correct?: boolean | null
+          was_skipped?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_attempt_questions_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_attempt_questions_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_attempts: {
+        Row: {
+          answer_timer_starts_at: string | null
+          cleared_questions: number
+          coin_reward: number
+          current_question: number
+          deadline_at: string | null
+          ended_at: string | null
+          entry_id: string | null
+          event_id: string
+          fifty_fifty_used: boolean
+          game_state: string
+          guest_id: string
+          hint_used: boolean
+          id: string
+          meta: Json
+          presented_at: string | null
+          result: string | null
+          skip_used: boolean
+          skipped_questions: number
+          started_at: string
+          status: string
+          wrong_question: number | null
+        }
+        Insert: {
+          answer_timer_starts_at?: string | null
+          cleared_questions?: number
+          coin_reward?: number
+          current_question?: number
+          deadline_at?: string | null
+          ended_at?: string | null
+          entry_id?: string | null
+          event_id: string
+          fifty_fifty_used?: boolean
+          game_state?: string
+          guest_id: string
+          hint_used?: boolean
+          id?: string
+          meta?: Json
+          presented_at?: string | null
+          result?: string | null
+          skip_used?: boolean
+          skipped_questions?: number
+          started_at?: string
+          status?: string
+          wrong_question?: number | null
+        }
+        Update: {
+          answer_timer_starts_at?: string | null
+          cleared_questions?: number
+          coin_reward?: number
+          current_question?: number
+          deadline_at?: string | null
+          ended_at?: string | null
+          entry_id?: string | null
+          event_id?: string
+          fifty_fifty_used?: boolean
+          game_state?: string
+          guest_id?: string
+          hint_used?: boolean
+          id?: string
+          meta?: Json
+          presented_at?: string | null
+          result?: string | null
+          skip_used?: boolean
+          skipped_questions?: number
+          started_at?: string
+          status?: string
+          wrong_question?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_attempts_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_attempts_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_attempts_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_entries: {
+        Row: {
+          attempt_id: string | null
+          created_at: string
+          currency: string
+          entry_type: string
+          event_id: string
+          free_entry_used: boolean
+          guest_id: string
+          id: string
+          idempotency_key: string | null
+          ledger_ref: string | null
+          occurrence_id: string | null
+          paid_entry: boolean
+          price: number
+          status: string
+        }
+        Insert: {
+          attempt_id?: string | null
+          created_at?: string
+          currency?: string
+          entry_type: string
+          event_id: string
+          free_entry_used?: boolean
+          guest_id: string
+          id?: string
+          idempotency_key?: string | null
+          ledger_ref?: string | null
+          occurrence_id?: string | null
+          paid_entry?: boolean
+          price?: number
+          status?: string
+        }
+        Update: {
+          attempt_id?: string | null
+          created_at?: string
+          currency?: string
+          entry_type?: string
+          event_id?: string
+          free_entry_used?: boolean
+          guest_id?: string
+          id?: string
+          idempotency_key?: string | null
+          ledger_ref?: string | null
+          occurrence_id?: string | null
+          paid_entry?: boolean
+          price?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_entries_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: true
+            referencedRelation: "crorepati_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_entries_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_entries_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_entries_occurrence_id_fkey"
+            columns: ["occurrence_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_event_occurrences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_entry_state: {
+        Row: {
+          event_id: string
+          free_entries: number
+          free_entries_used: number
+          guest_id: string
+          last_played_at: string | null
+          last_recovered_at: string | null
+          missed_streak: number
+          paid_entries_used: number
+          recovery_count: number
+          updated_at: string
+          zero_notified: boolean
+        }
+        Insert: {
+          event_id: string
+          free_entries?: number
+          free_entries_used?: number
+          guest_id: string
+          last_played_at?: string | null
+          last_recovered_at?: string | null
+          missed_streak?: number
+          paid_entries_used?: number
+          recovery_count?: number
+          updated_at?: string
+          zero_notified?: boolean
+        }
+        Update: {
+          event_id?: string
+          free_entries?: number
+          free_entries_used?: number
+          guest_id?: string
+          last_played_at?: string | null
+          last_recovered_at?: string | null
+          missed_streak?: number
+          paid_entries_used?: number
+          recovery_count?: number
+          updated_at?: string
+          zero_notified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_entry_state_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_entry_state_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: true
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_event_occurrences: {
+        Row: {
+          closed_at: string
+          created_at: string
+          event_id: string
+          id: string
+          opened_at: string
+          status: string
+        }
+        Insert: {
+          closed_at: string
+          created_at?: string
+          event_id: string
+          id?: string
+          opened_at: string
+          status?: string
+        }
+        Update: {
+          closed_at?: string
+          created_at?: string
+          event_id?: string
+          id?: string
+          opened_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_event_occurrences_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_events: {
+        Row: {
+          active: boolean
+          answer_timer_seconds: number
+          code: string
+          config: Json
+          created_at: string
+          entry_timezone: string
+          free_entries_grant: number
+          id: string
+          max_free_entries: number
+          missed_threshold: number
+          mode: string
+          open_hour: number
+          open_minute: number
+          paid_entry_coin_cost: number
+          paid_entry_enabled: boolean
+          pre_timer_seconds: number
+          question_count: number
+          schedule_weekdays: Json
+          title: string
+          window_minutes: number
+        }
+        Insert: {
+          active?: boolean
+          answer_timer_seconds?: number
+          code: string
+          config?: Json
+          created_at?: string
+          entry_timezone?: string
+          free_entries_grant?: number
+          id?: string
+          max_free_entries?: number
+          missed_threshold?: number
+          mode?: string
+          open_hour?: number
+          open_minute?: number
+          paid_entry_coin_cost?: number
+          paid_entry_enabled?: boolean
+          pre_timer_seconds?: number
+          question_count?: number
+          schedule_weekdays?: Json
+          title?: string
+          window_minutes?: number
+        }
+        Update: {
+          active?: boolean
+          answer_timer_seconds?: number
+          code?: string
+          config?: Json
+          created_at?: string
+          entry_timezone?: string
+          free_entries_grant?: number
+          id?: string
+          max_free_entries?: number
+          missed_threshold?: number
+          mode?: string
+          open_hour?: number
+          open_minute?: number
+          paid_entry_coin_cost?: number
+          paid_entry_enabled?: boolean
+          pre_timer_seconds?: number
+          question_count?: number
+          schedule_weekdays?: Json
+          title?: string
+          window_minutes?: number
+        }
+        Relationships: []
+      }
+      crorepati_participation: {
+        Row: {
+          attempt_id: string | null
+          closed_at: string
+          counted: boolean
+          created_at: string
+          eligible: boolean
+          event_id: string
+          guest_id: string
+          occurrence_id: string
+          opened_at: string
+          played: boolean
+        }
+        Insert: {
+          attempt_id?: string | null
+          closed_at: string
+          counted?: boolean
+          created_at?: string
+          eligible?: boolean
+          event_id: string
+          guest_id: string
+          occurrence_id: string
+          opened_at: string
+          played?: boolean
+        }
+        Update: {
+          attempt_id?: string | null
+          closed_at?: string
+          counted?: boolean
+          created_at?: string
+          eligible?: boolean
+          event_id?: string
+          guest_id?: string
+          occurrence_id?: string
+          opened_at?: string
+          played?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_participation_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_participation_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_participation_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crorepati_participation_occurrence_id_fkey"
+            columns: ["occurrence_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_event_occurrences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_rewards: {
+        Row: {
+          coins: number
+          event_id: string
+          question_number: number
+        }
+        Insert: {
+          coins?: number
+          event_id: string
+          question_number: number
+        }
+        Update: {
+          coins?: number
+          event_id?: string
+          question_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_rewards_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "crorepati_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crorepati_served_questions: {
+        Row: {
+          guest_id: string
+          last_served_at: string
+          question_hash: string
+        }
+        Insert: {
+          guest_id: string
+          last_served_at?: string
+          question_hash: string
+        }
+        Update: {
+          guest_id?: string
+          last_served_at?: string
+          question_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crorepati_served_questions_guest_id_fkey"
             columns: ["guest_id"]
             isOneToOne: false
             referencedRelation: "guests"
@@ -1187,6 +1846,617 @@ export type Database = {
           },
         ]
       }
+      mega_events: {
+        Row: {
+          category: string
+          code: string
+          created_at: string
+          difficulty: string
+          ends_at: string
+          id: string
+          max_players: number
+          min_players: number
+          multiplayer_enabled: boolean
+          pass_cost: number
+          pre_timer_seconds: number
+          question_count: number
+          question_seconds: number
+          rewards: Json
+          rules: Json
+          scoring: Json
+          solo_enabled: boolean
+          solo_question_count: number
+          solo_required_correct: number
+          solo_total_seconds: number
+          starts_at: string
+          status: string
+          timezone: string
+          title: string
+        }
+        Insert: {
+          category?: string
+          code: string
+          created_at?: string
+          difficulty?: string
+          ends_at?: string
+          id?: string
+          max_players?: number
+          min_players?: number
+          multiplayer_enabled?: boolean
+          pass_cost?: number
+          pre_timer_seconds?: number
+          question_count?: number
+          question_seconds?: number
+          rewards?: Json
+          rules?: Json
+          scoring?: Json
+          solo_enabled?: boolean
+          solo_question_count?: number
+          solo_required_correct?: number
+          solo_total_seconds?: number
+          starts_at?: string
+          status?: string
+          timezone?: string
+          title?: string
+        }
+        Update: {
+          category?: string
+          code?: string
+          created_at?: string
+          difficulty?: string
+          ends_at?: string
+          id?: string
+          max_players?: number
+          min_players?: number
+          multiplayer_enabled?: boolean
+          pass_cost?: number
+          pre_timer_seconds?: number
+          question_count?: number
+          question_seconds?: number
+          rewards?: Json
+          rules?: Json
+          scoring?: Json
+          solo_enabled?: boolean
+          solo_question_count?: number
+          solo_required_correct?: number
+          solo_total_seconds?: number
+          starts_at?: string
+          status?: string
+          timezone?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      mega_lobby_presence: {
+        Row: {
+          display_name: string
+          event_id: string
+          guest_id: string
+          last_seen_at: string
+          match_id: string | null
+          state: string
+        }
+        Insert: {
+          display_name?: string
+          event_id: string
+          guest_id: string
+          last_seen_at?: string
+          match_id?: string | null
+          state?: string
+        }
+        Update: {
+          display_name?: string
+          event_id?: string
+          guest_id?: string
+          last_seen_at?: string
+          match_id?: string | null
+          state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_lobby_presence_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_lobby_presence_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: true
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_match_answers: {
+        Row: {
+          answered_at: string
+          guest_id: string
+          hint_shown: boolean
+          is_correct: boolean
+          match_id: string
+          option_index: number | null
+          question_number: number
+          removed_options: Json | null
+          response_ms: number
+          score_delta: number
+          skipped: boolean
+        }
+        Insert: {
+          answered_at?: string
+          guest_id: string
+          hint_shown?: boolean
+          is_correct?: boolean
+          match_id: string
+          option_index?: number | null
+          question_number: number
+          removed_options?: Json | null
+          response_ms?: number
+          score_delta?: number
+          skipped?: boolean
+        }
+        Update: {
+          answered_at?: string
+          guest_id?: string
+          hint_shown?: boolean
+          is_correct?: boolean
+          match_id?: string
+          option_index?: number | null
+          question_number?: number
+          removed_options?: Json | null
+          response_ms?: number
+          score_delta?: number
+          skipped?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_match_answers_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_match_answers_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "mega_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_match_players: {
+        Row: {
+          correct_count: number
+          display_name: string
+          fifty_fifty_used: boolean
+          guest_id: string
+          hint_used: boolean
+          is_host: boolean
+          joined_at: string
+          last_seen_at: string
+          match_id: string
+          rank: number | null
+          score: number
+          skip_used: boolean
+          state: string
+          total_response_ms: number
+          unanswered_count: number
+          wrong_count: number
+        }
+        Insert: {
+          correct_count?: number
+          display_name?: string
+          fifty_fifty_used?: boolean
+          guest_id: string
+          hint_used?: boolean
+          is_host?: boolean
+          joined_at?: string
+          last_seen_at?: string
+          match_id: string
+          rank?: number | null
+          score?: number
+          skip_used?: boolean
+          state?: string
+          total_response_ms?: number
+          unanswered_count?: number
+          wrong_count?: number
+        }
+        Update: {
+          correct_count?: number
+          display_name?: string
+          fifty_fifty_used?: boolean
+          guest_id?: string
+          hint_used?: boolean
+          is_host?: boolean
+          joined_at?: string
+          last_seen_at?: string
+          match_id?: string
+          rank?: number | null
+          score?: number
+          skip_used?: boolean
+          state?: string
+          total_response_ms?: number
+          unanswered_count?: number
+          wrong_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_match_players_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_match_players_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "mega_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_match_questions: {
+        Row: {
+          category: string
+          correct_index: number
+          difficulty: string
+          event_id: string
+          explanation: string
+          hint: string
+          id: string
+          match_id: string
+          options: Json
+          question: string
+          question_number: number
+          resolved: boolean
+        }
+        Insert: {
+          category?: string
+          correct_index: number
+          difficulty?: string
+          event_id: string
+          explanation?: string
+          hint?: string
+          id?: string
+          match_id: string
+          options: Json
+          question: string
+          question_number: number
+          resolved?: boolean
+        }
+        Update: {
+          category?: string
+          correct_index?: number
+          difficulty?: string
+          event_id?: string
+          explanation?: string
+          hint?: string
+          id?: string
+          match_id?: string
+          options?: Json
+          question?: string
+          question_number?: number
+          resolved?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_match_questions_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_match_questions_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "mega_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_match_results: {
+        Row: {
+          created_at: string
+          duration_ms: number
+          ended_at: string | null
+          event_id: string
+          id: string
+          match_id: string
+          mode: string
+          outcome: string
+          question_count: number
+          standings: Json
+          started_at: string | null
+          tie_break_reason: string
+          winner_guest_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number
+          ended_at?: string | null
+          event_id: string
+          id?: string
+          match_id: string
+          mode: string
+          outcome?: string
+          question_count: number
+          standings?: Json
+          started_at?: string | null
+          tie_break_reason?: string
+          winner_guest_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number
+          ended_at?: string | null
+          event_id?: string
+          id?: string
+          match_id?: string
+          mode?: string
+          outcome?: string
+          question_count?: number
+          standings?: Json
+          started_at?: string | null
+          tie_break_reason?: string
+          winner_guest_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_match_results_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_match_results_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: true
+            referencedRelation: "mega_matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_match_results_winner_guest_id_fkey"
+            columns: ["winner_guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_matches: {
+        Row: {
+          answer_timer_starts_at: string | null
+          created_at: string
+          current_question: number
+          ended_at: string | null
+          event_id: string
+          host_guest_id: string
+          id: string
+          mode: string
+          presented_at: string | null
+          question_count: number
+          question_deadline_at: string | null
+          question_seconds: number
+          solo_deadline_at: string | null
+          started_at: string | null
+          status: string
+          tie_break_reason: string
+          winner_guest_id: string | null
+        }
+        Insert: {
+          answer_timer_starts_at?: string | null
+          created_at?: string
+          current_question?: number
+          ended_at?: string | null
+          event_id: string
+          host_guest_id: string
+          id?: string
+          mode?: string
+          presented_at?: string | null
+          question_count: number
+          question_deadline_at?: string | null
+          question_seconds?: number
+          solo_deadline_at?: string | null
+          started_at?: string | null
+          status?: string
+          tie_break_reason?: string
+          winner_guest_id?: string | null
+        }
+        Update: {
+          answer_timer_starts_at?: string | null
+          created_at?: string
+          current_question?: number
+          ended_at?: string | null
+          event_id?: string
+          host_guest_id?: string
+          id?: string
+          mode?: string
+          presented_at?: string | null
+          question_count?: number
+          question_deadline_at?: string | null
+          question_seconds?: number
+          solo_deadline_at?: string | null
+          started_at?: string | null
+          status?: string
+          tie_break_reason?: string
+          winner_guest_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_matches_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_matches_host_guest_id_fkey"
+            columns: ["host_guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_matches_winner_guest_id_fkey"
+            columns: ["winner_guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_passes: {
+        Row: {
+          cost: number
+          event_id: string
+          guest_id: string
+          id: string
+          purchased_at: string
+          status: string
+          valid_from: string
+          valid_until: string
+        }
+        Insert: {
+          cost?: number
+          event_id: string
+          guest_id: string
+          id?: string
+          purchased_at?: string
+          status?: string
+          valid_from?: string
+          valid_until: string
+        }
+        Update: {
+          cost?: number
+          event_id?: string
+          guest_id?: string
+          id?: string
+          purchased_at?: string
+          status?: string
+          valid_from?: string
+          valid_until?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_passes_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_passes_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_player_results: {
+        Row: {
+          coins_awarded: number
+          correct_count: number
+          created_at: string
+          event_id: string
+          guest_id: string
+          is_winner: boolean
+          match_id: string
+          mode: string
+          outcome: string
+          rank: number
+          score: number
+          total_response_ms: number
+          unanswered_count: number
+          wrong_count: number
+        }
+        Insert: {
+          coins_awarded?: number
+          correct_count?: number
+          created_at?: string
+          event_id: string
+          guest_id: string
+          is_winner?: boolean
+          match_id: string
+          mode: string
+          outcome?: string
+          rank?: number
+          score?: number
+          total_response_ms?: number
+          unanswered_count?: number
+          wrong_count?: number
+        }
+        Update: {
+          coins_awarded?: number
+          correct_count?: number
+          created_at?: string
+          event_id?: string
+          guest_id?: string
+          is_winner?: boolean
+          match_id?: string
+          mode?: string
+          outcome?: string
+          rank?: number
+          score?: number
+          total_response_ms?: number
+          unanswered_count?: number
+          wrong_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_player_results_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "mega_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_player_results_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mega_player_results_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "mega_matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mega_served_questions: {
+        Row: {
+          guest_id: string
+          last_served_at: string
+          question_hash: string
+        }
+        Insert: {
+          guest_id: string
+          last_served_at?: string
+          question_hash: string
+        }
+        Update: {
+          guest_id?: string
+          last_served_at?: string
+          question_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mega_served_questions_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       memories: {
         Row: {
           content: string
@@ -1484,6 +2754,299 @@ export type Database = {
           },
         ]
       }
+      trophy_designs: {
+        Row: {
+          active: boolean
+          code: string
+          created_at: string
+          event_id: string | null
+          event_kind: string
+          id: string
+          theme: Json
+          title: string
+          trophy_type: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          code: string
+          created_at?: string
+          event_id?: string | null
+          event_kind?: string
+          id?: string
+          theme?: Json
+          title: string
+          trophy_type: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          code?: string
+          created_at?: string
+          event_id?: string | null
+          event_kind?: string
+          id?: string
+          theme?: Json
+          title?: string
+          trophy_type?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      ustad_achievements: {
+        Row: {
+          awarded_at: string
+          created_at: string
+          event_id: string | null
+          event_kind: string
+          guest_id: string
+          id: string
+          level: number
+          match_id: string | null
+          metadata: Json
+          revoked_at: string | null
+          revoked_reason: string
+          source: string
+          title: string
+          type: string
+          verification_status: string
+        }
+        Insert: {
+          awarded_at?: string
+          created_at?: string
+          event_id?: string | null
+          event_kind?: string
+          guest_id: string
+          id?: string
+          level?: number
+          match_id?: string | null
+          metadata?: Json
+          revoked_at?: string | null
+          revoked_reason?: string
+          source?: string
+          title: string
+          type: string
+          verification_status?: string
+        }
+        Update: {
+          awarded_at?: string
+          created_at?: string
+          event_id?: string | null
+          event_kind?: string
+          guest_id?: string
+          id?: string
+          level?: number
+          match_id?: string | null
+          metadata?: Json
+          revoked_at?: string | null
+          revoked_reason?: string
+          source?: string
+          title?: string
+          type?: string
+          verification_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ustad_achievements_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ustad_certificates: {
+        Row: {
+          achievement_id: string
+          certificate_id: string
+          certificate_type: string
+          claim_count: number
+          claimed_at: string | null
+          created_at: string
+          event_id: string | null
+          guest_id: string
+          id: string
+          integrity_hash: string
+          issued_at: string
+          match_id: string | null
+          metadata: Json
+          revoked_at: string | null
+          revoked_reason: string
+          template_code: string
+          template_version: number
+          updated_at: string
+          verification_status: string
+          verification_token: string
+        }
+        Insert: {
+          achievement_id: string
+          certificate_id: string
+          certificate_type: string
+          claim_count?: number
+          claimed_at?: string | null
+          created_at?: string
+          event_id?: string | null
+          guest_id: string
+          id?: string
+          integrity_hash?: string
+          issued_at?: string
+          match_id?: string | null
+          metadata?: Json
+          revoked_at?: string | null
+          revoked_reason?: string
+          template_code?: string
+          template_version?: number
+          updated_at?: string
+          verification_status?: string
+          verification_token: string
+        }
+        Update: {
+          achievement_id?: string
+          certificate_id?: string
+          certificate_type?: string
+          claim_count?: number
+          claimed_at?: string | null
+          created_at?: string
+          event_id?: string | null
+          guest_id?: string
+          id?: string
+          integrity_hash?: string
+          issued_at?: string
+          match_id?: string | null
+          metadata?: Json
+          revoked_at?: string | null
+          revoked_reason?: string
+          template_code?: string
+          template_version?: number
+          updated_at?: string
+          verification_status?: string
+          verification_token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ustad_certificates_achievement_id_fkey"
+            columns: ["achievement_id"]
+            isOneToOne: false
+            referencedRelation: "ustad_achievements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ustad_certificates_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ustad_coin_ledger: {
+        Row: {
+          coins: number
+          created_at: string
+          guest_id: string
+          id: string
+          note: string
+          ref_id: string
+          source: string
+        }
+        Insert: {
+          coins?: number
+          created_at?: string
+          guest_id: string
+          id?: string
+          note?: string
+          ref_id: string
+          source: string
+        }
+        Update: {
+          coins?: number
+          created_at?: string
+          guest_id?: string
+          id?: string
+          note?: string
+          ref_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ustad_coin_ledger_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ustad_trophies: {
+        Row: {
+          achievement_id: string
+          created_at: string
+          design_code: string
+          design_id: string | null
+          design_version: number
+          engraving: Json
+          event_id: string | null
+          guest_id: string
+          id: string
+          image_reference: string | null
+          image_status: string
+          match_id: string | null
+          type: string
+        }
+        Insert: {
+          achievement_id: string
+          created_at?: string
+          design_code?: string
+          design_id?: string | null
+          design_version?: number
+          engraving?: Json
+          event_id?: string | null
+          guest_id: string
+          id?: string
+          image_reference?: string | null
+          image_status?: string
+          match_id?: string | null
+          type: string
+        }
+        Update: {
+          achievement_id?: string
+          created_at?: string
+          design_code?: string
+          design_id?: string | null
+          design_version?: number
+          engraving?: Json
+          event_id?: string | null
+          guest_id?: string
+          id?: string
+          image_reference?: string | null
+          image_status?: string
+          match_id?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ustad_trophies_achievement_id_fkey"
+            columns: ["achievement_id"]
+            isOneToOne: true
+            referencedRelation: "ustad_achievements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ustad_trophies_design_id_fkey"
+            columns: ["design_id"]
+            isOneToOne: false
+            referencedRelation: "trophy_designs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ustad_trophies_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1508,12 +3071,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1537,11 +3100,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1562,11 +3125,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1587,11 +3150,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1604,11 +3167,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
