@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, KeyRound, User, Sliders, ShieldAlert, Trash2, Plug, Images } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/AppShell";
@@ -15,6 +15,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PROVIDERS, CATEGORIES, STATUS_LABELS } from "@/lib/providers";
 import { useGuest, shortId } from "@/lib/ustad-client";
 import { useSettings, saveProfilePatch } from "@/lib/settings-store";
+import { crorepatiProfileStatsFn, crorepatiEntryProfileStatsFn } from "@/lib/crorepati.functions";
+import { walletPanelFn } from "@/lib/wallet.functions";
+import {
+  avatarStateFn,
+  avatarUploadFn,
+  avatarRemoveFn,
+  avatarEquipFrameFn,
+  avatarRemoveFrameFn,
+} from "@/lib/avatar.functions";
+import { megaProfileStatsFn } from "@/lib/mega.functions";
+import { AchievementShowcase } from "@/components/AchievementShowcase";
+import { CertificateSection } from "@/components/CertificateSection";
 import {
   listApiConfigsFn,
   saveApiConfigFn,
@@ -316,6 +328,7 @@ function ProfilePanel({ initial }: { initial: Record<string, unknown> | null }) 
 
   return (
     <>
+      <ProfileAvatarPanel />
       <div className="panel mb-4 space-y-2 p-5">
         <Label>Appearance</Label>
         <p className="text-xs text-muted-foreground">
@@ -375,7 +388,358 @@ function ProfilePanel({ initial }: { initial: Record<string, unknown> | null }) 
           </>
         )}
       </div>
+      <UstadCoinWallet />
+      <CrorepatiProfileStats />
+      <CrorepatiEntryStats />
+      <MegaProfileStats />
+      <AchievementShowcase />
+      <CertificateSection />
     </>
+  );
+}
+
+/**
+ * Profile DP / avatar + equipped avatar frame (Part 8), rendered INSIDE the
+ * existing profile. Clicking the picture opens the device's native gallery /
+ * photo picker; the chosen image is validated and stored server-side, so it
+ * survives refresh, reopening the app and new sessions.
+ */
+function ProfileAvatarPanel() {
+  const { token } = useGuest();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [state, setState] = useState<Awaited<ReturnType<typeof avatarStateFn>> | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    try {
+      setState((await avatarStateFn({ data: { token } })) as never);
+    } catch {
+      setState(null);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** One image, straight from the native picker → validate → upload → show. */
+  const onPick = useCallback(
+    async (file: File | undefined) => {
+      if (!file || !token) return;
+      setBusy(true);
+      // Lightweight local preview so the user sees their choice immediately.
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result ?? ""));
+        fr.onerror = () => reject(new Error("read failed"));
+        fr.readAsDataURL(file);
+      }).catch(() => "");
+
+      if (!dataUrl) {
+        toast.error("Ye image upload nahi ho sakti. Kripya valid image select karein.");
+        setBusy(false);
+        return;
+      }
+      setPreview(dataUrl);
+
+      try {
+        const next = await avatarUploadFn({ data: { token, dataUrl, fileName: file.name } });
+        setState(next as never);
+        toast.success("Profile picture updated.");
+      } catch (err) {
+        // The old DP is still in place server-side — drop only the preview.
+        setPreview(null);
+        toast.error(err instanceof Error ? err.message : "Upload failed.");
+      } finally {
+        setBusy(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }
+    },
+    [token],
+  );
+
+  const act = useCallback(async (fn: () => Promise<unknown>, okMsg: string) => {
+    setBusy(true);
+    try {
+      setState((await fn()) as never);
+      setPreview(null);
+      toast.success(okMsg);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const shown = preview ?? state?.avatarUrl ?? null;
+  const frame = state?.frames.find((f) => f.equipped) ?? null;
+  const ownedFrames = state?.frames.filter((f) => f.owned) ?? [];
+
+  return (
+    <div className="panel mb-4 space-y-4 p-5" data-testid="profile-avatar-panel">
+      <Label>Profile picture</Label>
+
+      <div className="flex flex-wrap items-center gap-4">
+        {/* The DP itself is the button — clicking it opens the native picker. */}
+        <button
+          type="button"
+          data-testid="avatar-click"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          aria-label="Change your profile picture"
+          className="relative size-24 shrink-0 rounded-full outline-none ring-offset-2 ring-offset-background focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <span
+            data-testid="avatar-frame-ring"
+            data-frame={frame?.itemId ?? ""}
+            className={`absolute inset-0 rounded-full ${
+              frame ? "ring-4 ring-amber-400" : "ring-1 ring-border"
+            }`}
+            aria-hidden
+          />
+          {shown ? (
+            // object-cover fills the circle without stretching or distorting.
+            <img
+              src={shown}
+              alt="Your profile picture"
+              data-testid="avatar-image"
+              className="size-24 rounded-full object-cover"
+            />
+          ) : (
+            <span
+              data-testid="avatar-default"
+              className="flex size-24 items-center justify-center rounded-full bg-muted text-2xl font-semibold text-muted-foreground"
+            >
+              U
+            </span>
+          )}
+          {busy ? (
+            <span className="absolute inset-0 grid place-items-center rounded-full bg-background/60">
+              <Loader2 className="size-5 animate-spin" aria-hidden />
+            </span>
+          ) : null}
+        </button>
+
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Tap your picture to choose one from your gallery.
+            <br />
+            JPG, PNG, WebP, GIF, HEIC or AVIF up to 5 MB.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              Change picture
+            </Button>
+            {state?.hasCustomAvatar ? (
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="avatar-remove"
+                disabled={busy}
+                onClick={() =>
+                  act(() => avatarRemoveFn({ data: { token: token! } }), "Profile picture removed.")
+                }
+              >
+                Remove DP
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {/* The native gallery / photo picker. capture is deliberately absent so
+          mobile browsers offer the photo library, not just the camera. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,image/avif,image/bmp"
+        className="hidden"
+        data-testid="avatar-input"
+        onChange={(e) => void onPick(e.target.files?.[0])}
+      />
+
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Avatar frames {frame ? `· equipped: ${frame.name}` : "· none equipped"}
+        </p>
+        {ownedFrames.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            You do not own any avatar frames yet. Buy one in the USTAD Shop.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2" data-testid="owned-frames">
+            {ownedFrames.map((f) =>
+              f.equipped ? (
+                <Button
+                  key={f.itemId}
+                  size="sm"
+                  variant="secondary"
+                  disabled
+                  data-testid={`frame-equipped-${f.itemId}`}
+                >
+                  {f.name} · Equipped ✓
+                </Button>
+              ) : (
+                <Button
+                  key={f.itemId}
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  data-testid={`frame-equip-${f.itemId}`}
+                  onClick={() =>
+                    act(
+                      () => avatarEquipFrameFn({ data: { token: token!, itemId: f.itemId } }),
+                      `${f.name} equipped.`,
+                    )
+                  }
+                >
+                  Equip {f.name}
+                </Button>
+              ),
+            )}
+            {frame ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="frame-remove"
+                disabled={busy}
+                onClick={() =>
+                  act(() => avatarRemoveFrameFn({ data: { token: token! } }), "Frame removed.")
+                }
+              >
+                Remove Frame
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * USTAD Coin wallet + coin history, rendered INSIDE the existing profile
+ * (Part 7). The balance shown here is the authoritative database value read
+ * from the server on every mount — never a locally computed number.
+ */
+function UstadCoinWallet() {
+  const { token } = useGuest();
+  const [panel, setPanel] = useState<Awaited<ReturnType<typeof walletPanelFn>> | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    void walletPanelFn({ data: { token } })
+      .then((r) => setPanel(r as never))
+      .catch(() => setPanel(null));
+  }, [token]);
+
+  if (!panel) return null;
+
+  return (
+    <div className="panel mt-4 space-y-3 p-5" data-testid="profile-wallet">
+      <Label>USTAD Coins</Label>
+      <dl className="grid grid-cols-3 gap-2 text-sm">
+        <div className="flex flex-col">
+          <dt className="text-xs text-muted-foreground">Balance</dt>
+          <dd className="font-semibold" data-testid="profile-balance">
+            {panel.wallet.balance.toLocaleString("en-IN")}
+          </dd>
+        </div>
+        <div className="flex flex-col">
+          <dt className="text-xs text-muted-foreground">Lifetime earned</dt>
+          <dd className="font-semibold">{panel.wallet.lifetimeEarned.toLocaleString("en-IN")}</dd>
+        </div>
+        <div className="flex flex-col">
+          <dt className="text-xs text-muted-foreground">Lifetime spent</dt>
+          <dd className="font-semibold">{panel.wallet.lifetimeSpent.toLocaleString("en-IN")}</dd>
+        </div>
+      </dl>
+
+      {panel.history.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">USTAD Coin History</p>
+          <ul className="max-h-72 space-y-1 overflow-y-auto text-sm" data-testid="coin-history">
+            {panel.history.map((tx) => (
+              <li
+                key={tx.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-border/50 px-3 py-2"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">{tx.note}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {new Date(tx.createdAt).toLocaleDateString("en-IN")}
+                    {tx.balanceAfter !== null
+                      ? ` · balance ${tx.balanceAfter.toLocaleString("en-IN")}`
+                      : ""}
+                  </span>
+                </span>
+                <span
+                  className={`shrink-0 font-semibold ${
+                    tx.direction === "SPEND" ? "text-red-400" : "text-emerald-400"
+                  }`}
+                >
+                  {tx.amount > 0 ? "+" : ""}
+                  {tx.amount.toLocaleString("en-IN")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Crorepati summary rendered INSIDE the existing USTAD profile.
+ * Part 1 deliberately does not create a second profile page.
+ */
+function CrorepatiProfileStats() {
+  const { token } = useGuest();
+  const [stats, setStats] = useState<{
+    attempts: number;
+    wins: number;
+    losses: number;
+    totalQuestionsCleared: number;
+    totalCoins: number;
+    bestCleared: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    void crorepatiProfileStatsFn({ data: { token } })
+      .then((r) => setStats(r as never))
+      .catch(() => setStats(null));
+  }, [token]);
+
+  if (!stats || !stats.attempts) return null;
+  const rows: Array<[string, string | number]> = [
+    ["Attempts", stats.attempts],
+    ["Wins", stats.wins],
+    ["Losses", stats.losses],
+    ["Questions cleared", stats.totalQuestionsCleared],
+    ["Best performance", `${stats.bestCleared} / 20`],
+    ["USTAD Coins from Crorepati", stats.totalCoins.toLocaleString("en-IN")],
+  ];
+  return (
+    <div className="panel mt-4 space-y-2 p-5">
+      <Label>Kon Banega Crorepati</Label>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex flex-col">
+            <dt className="text-xs text-muted-foreground">{k}</dt>
+            <dd className="font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -494,6 +858,104 @@ function DataPanel({ token, guestId }: { token: string; guestId: string }) {
           Delete selected
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Mega Tournament summary rendered INSIDE the existing USTAD profile.
+ * Part 2 does not create a second profile page either.
+ */
+function MegaProfileStats() {
+  const { token } = useGuest();
+  const [stats, setStats] = useState<{
+    matches: number;
+    wins: number;
+    losses: number;
+    multiplayerWins: number;
+    soloWins: number;
+    totalCorrect: number;
+    bestCorrect: number;
+    coinsFromTournament: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    void megaProfileStatsFn({ data: { token } })
+      .then((r) => setStats(r as never))
+      .catch(() => setStats(null));
+  }, [token]);
+
+  if (!stats || !stats.matches) return null;
+  const rows: Array<[string, string | number]> = [
+    ["Matches", stats.matches],
+    ["Wins", stats.wins],
+    ["Losses", stats.losses],
+    ["Multiplayer wins", stats.multiplayerWins],
+    ["Single-player wins", stats.soloWins],
+    ["Correct answers", stats.totalCorrect],
+    ["Best performance", stats.bestCorrect],
+    ["USTAD Coins from tournaments", stats.coinsFromTournament.toLocaleString("en-IN")],
+  ];
+  return (
+    <div className="panel mt-4 space-y-2 p-5">
+      <Label>Mega Tournament</Label>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex flex-col">
+            <dt className="text-xs text-muted-foreground">{k}</dt>
+            <dd className="font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * Crorepati entry/free-attempt summary, rendered INSIDE the existing profile.
+ * Part 3 creates no new profile page either.
+ */
+function CrorepatiEntryStats() {
+  const { token } = useGuest();
+  const [stats, setStats] = useState<{
+    freeEntries: number;
+    maxFreeEntries: number;
+    freeEntriesUsed: number;
+    paidEntriesUsed: number;
+    missedStreak: number;
+    missedThreshold: number;
+    recoveryCount: number;
+    coinsSpentOnEntries: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    void crorepatiEntryProfileStatsFn({ data: { token } })
+      .then((r) => setStats(r as never))
+      .catch(() => setStats(null));
+  }, [token]);
+
+  if (!stats) return null;
+  const rows: Array<[string, string | number]> = [
+    ["Free entries available", `${stats.freeEntries} / ${stats.maxFreeEntries}`],
+    ["Free attempts used", stats.freeEntriesUsed],
+    ["Paid attempts", stats.paidEntriesUsed],
+    ["Missed event streak", `${stats.missedStreak} / ${stats.missedThreshold}`],
+    ["Free-entry recoveries", stats.recoveryCount],
+    ["USTAD Coins spent on entries", stats.coinsSpentOnEntries.toLocaleString("en-IN")],
+  ];
+  return (
+    <div className="panel mt-4 space-y-2 p-5">
+      <Label>Crorepati entries</Label>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex flex-col">
+            <dt className="text-xs text-muted-foreground">{k}</dt>
+            <dd className="font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

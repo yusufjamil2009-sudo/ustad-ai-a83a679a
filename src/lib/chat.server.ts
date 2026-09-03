@@ -17,6 +17,10 @@ import { ocrImage, type ChatMessage } from "./provider-clients.server";
 import { parseWhen, detectRepeat } from "./chronos";
 import { answerChrono, chronoContext, needsChrono } from "./chrono-engine";
 import { examContext } from "./exam-engine.server";
+import { achievementContext } from "./trophy-engine.server";
+import { certificateContext } from "./certificate-engine.server";
+import { masterEventContext } from "./master-event-engine.server";
+import { walletContext } from "./wallet.server";
 import { generateImage, imagePromptFrom, wantsImageGeneration } from "./image-gen.server";
 import { userFacingAiMessage } from "./provider-errors";
 import { getProvider } from "./providers";
@@ -180,6 +184,18 @@ export async function sendMessage(input: {
 
   /* examination records — authoritative marks, never guessed */
   const examFacts = await examContext(guestId).catch(() => "");
+
+  /* trophy / cup / grandmaster records — authoritative rank, never guessed */
+  const achievementFacts = await achievementContext(guestId).catch(() => "");
+
+  /* issued certificates — authoritative ids and dates, never guessed */
+  const certificateFacts = await certificateContext(guestId).catch(() => "");
+
+  /* master event participation — verified results only, never guessed */
+  const eventFacts = await masterEventContext(guestId).catch(() => "");
+
+  /* USTAD Coin wallet — the authoritative balance, never guessed */
+  const walletFacts = await walletContext(guestId).catch(() => "");
 
   const available = await usableProviders(guestId);
 
@@ -372,7 +388,14 @@ export async function sendMessage(input: {
     language: decision.language,
     decision,
     profile: profile ?? {},
-    memories: [...(memories ?? []).map((m) => m.content), ...(examFacts ? [examFacts] : [])],
+    memories: [
+      ...(memories ?? []).map((m) => m.content),
+      ...(examFacts ? [examFacts] : []),
+      ...(achievementFacts ? [achievementFacts] : []),
+      ...(certificateFacts ? [certificateFacts] : []),
+      ...(eventFacts ? [eventFacts] : []),
+      ...(walletFacts ? [walletFacts] : []),
+    ],
     goals: (goals ?? []).map((g) => g.title),
     chronoContext: chronoFacts,
     ...(curriculumLine ? { curriculumContext: curriculumLine } : {}),
