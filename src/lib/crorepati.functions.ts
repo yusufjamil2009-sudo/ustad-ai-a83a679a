@@ -6,18 +6,21 @@
 import { createServerFn } from "@tanstack/react-start";
 import * as engine from "./crorepati-engine.server";
 import * as entry from "./crorepati-entry.server";
-import type { Language } from "./router.server";
 
 export const crorepatiStateFn = createServerFn({ method: "POST" })
   .inputValidator((d: { token: string }) => d)
   .handler(async ({ data: d }) => engine.getActiveAttempt(d.token));
 
+/*
+ * The client cannot choose the language. It is resolved server-side from the
+ * single USTAD AI language preference and snapshotted on the attempt, so a
+ * forged `language` field in the request body has nothing to attach to.
+ */
 export const crorepatiStartFn = createServerFn({ method: "POST" })
-  .inputValidator((d: { token: string; language?: Language; idempotencyKey?: string }) => d)
+  .inputValidator((d: { token: string; idempotencyKey?: string }) => d)
   .handler(async ({ data: d }) =>
     engine.startAttempt({
       token: d.token,
-      ...(d.language ? { language: d.language } : {}),
       ...(d.idempotencyKey ? { idempotencyKey: d.idempotencyKey } : {}),
     }),
   );

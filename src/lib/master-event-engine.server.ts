@@ -550,6 +550,7 @@ function viewAttempt(attempt: Row, event: Row, q: Row | null): MasterAttemptView
  * against everything this guest has already been served for this event.
  */
 async function buildQuestions(input: {
+  language: Language;
   guestId: string;
   event: Row;
   count: number;
@@ -564,13 +565,20 @@ async function buildQuestions(input: {
 
   const { data: guest } = await sdb()
     .from("guests")
-    .select("klass,language")
+    .select("klass")
     .eq("id", input.guestId)
     .maybeSingle();
 
+  /*
+   * One authoritative language for ALL event content. It comes from the USTAD
+   * AI settings store (never from `guests`/`profiles`, never from the client)
+   * and is passed in already-resolved by the caller, which snapshots it on the
+   * attempt. For a multiplayer match that snapshot is decided once by the
+   * server and shared by every player.
+   */
   const generated = await generateQuizSet({
     guestId: input.guestId,
-    language: (String((guest as Row)?.["language"] ?? "auto") || "auto") as Language,
+    language: input.language,
     klass: (guest as Row)?.["klass"] ?? null,
     avoid,
     seed: Date.now() % 100000,
@@ -655,7 +663,10 @@ export async function startAttempt(input: {
   if (!decision.allowed) throw new Error(decision.reason);
 
   const count = resolveQuestionCount(Number(event["question_count"]));
-  const questions = await buildQuestions({ guestId, event, count });
+  // Resolve the effective language ONCE, at start, from the single preference.
+  const { guestLocale } = await import("./notification.server");
+  const language = (await guestLocale(guestId)).language as Language;
+  const questions = await buildQuestions({ guestId, event, count, language });
 
   const now = new Date();
   const pre = Number(event["pre_timer_seconds"] ?? 10);
@@ -680,6 +691,7 @@ export async function startAttempt(input: {
       status: "active",
       game_state: "QUESTION_INTRO",
       question_count: count, // frozen on the attempt
+      language, // language snapshot — Settings changes cannot alter a live attempt
       current_question: 1,
       started_at: now.toISOString(),
       answer_timer_starts_at: answerStart.toISOString(),

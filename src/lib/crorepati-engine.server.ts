@@ -287,6 +287,28 @@ async function endAttempt(
 }
 
 /** Enforce the 90-second deadline on EVERY read/write touching an attempt. */
+/**
+ * Is the 90-second answer window actually open for this attempt?
+ *
+ * `answer_timer_starts_at` is written when the question is PRESENTED, so its
+ * mere presence only means the 10s get-ready countdown has begun. An answer or
+ * a lifeline is only legitimate once that instant has passed and the deadline
+ * has not. Small clock skew between the app server and the database is
+ * tolerated so a player on the boundary is never wrongly rejected.
+ */
+const CLOCK_SKEW_MS = 750;
+
+function answerWindowOpen(attempt: Row): boolean {
+  const startsAt = attempt["answer_timer_starts_at"] as string | null;
+  const deadlineAt = attempt["deadline_at"] as string | null;
+  if (!startsAt || !deadlineAt) return false;
+  const now = Date.now();
+  return (
+    now >= new Date(startsAt).getTime() - CLOCK_SKEW_MS &&
+    now <= new Date(deadlineAt).getTime() + CLOCK_SKEW_MS
+  );
+}
+
 async function enforceTimeout(attempt: Row, event: Row): Promise<Row> {
   if (attempt["status"] !== "active") return attempt;
   const deadline = deadlineOf(attempt);
@@ -360,7 +382,6 @@ export async function getActiveAttempt(token: unknown) {
  */
 export async function startAttempt(input: {
   token: unknown;
-  language?: Language;
   /** Part 3: makes a retried/refreshed start provably the same request. */
   idempotencyKey?: string;
 }) {
@@ -406,9 +427,15 @@ export async function startAttempt(input: {
       .order("last_served_at", { ascending: false })
       .limit(120);
 
-    const language = (input.language ??
-      (profile?.["language"] as Language) ??
-      "english") as Language;
+    /*
+     * Language comes from the ONE authoritative USTAD AI preference (the
+     * `settings` store, read via the shared `guestLocale` helper) — never from
+     * the client and never from the `profiles` mirror, which can drift. The
+     * resolved value is snapshotted onto the attempt below so that changing
+     * Settings mid-attempt cannot alter the game already in progress.
+     */
+    const { guestLocale } = await import("./notification.server");
+    const language = (await guestLocale(guestId)).language as Language;
 
     const { questions } = await generateCrorepatiSet({
       guestId,
@@ -425,6 +452,7 @@ export async function startAttempt(input: {
         event_id: event["id"],
         status: "active",
         game_state: "QUESTION_ANIMATING",
+        language,
         current_question: 1,
       })
       .select()
@@ -549,8 +577,20 @@ export async function submitAnswer(input: {
   if (qRow["answered_at"]) {
     return { view: await buildView(attempt, event), correct: false, duplicate: true };
   }
-  // The 90s timer must actually be running before an answer is accepted.
-  if (!attempt["answer_timer_starts_at"]) throw new Error("This question is not ready yet.");
+  /*
+   * HOTFIX — the 90s answer window must actually be OPEN.
+   *
+   * This previously only checked that `answer_timer_starts_at` was set, not
+   * that it had passed. The row is written the moment the question is
+   * presented, so during the 10-second get-ready countdown the field is
+   * already non-null and an early click was accepted as a real answer —
+   * usually a wrong one, which ended the game on Q1 before the player could
+   * legitimately answer. That is the reported "error when clicking an option".
+   *
+   * The client also disables the options during the pre-timer, but the client
+   * is not the authority: the server has to reject an early answer itself.
+   */
+  if (!answerWindowOpen(attempt)) throw new Error("This question is not ready yet.");
 
   const index = Number(input.optionIndex);
   if (!Number.isInteger(index) || index < 0 || index > 3) throw new Error("Invalid option.");
@@ -680,6 +720,14 @@ export async function useLifeline(input: {
   const current = Number(attempt["current_question"]);
   const qRow = await currentQuestionRow(String(attempt["id"]), current);
   if (!qRow) throw new Error("Question not found.");
+
+  // Same window rule as answering: a lifeline used during the 10s get-ready
+  // countdown would otherwise be consumed before the question was ever live.
+  if (!answerWindowOpen(attempt)) throw new Error("This question is not ready yet.");
+  // A question that is already resolved cannot take another lifeline.
+  if (qRow["answered_at"] || qRow["was_skipped"]) {
+    throw new Error("This question has already been answered.");
+  }
 
   // Atomically consume the lifeline (false → true) so a double click uses one.
   const { data: consumed } = await sdb()

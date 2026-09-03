@@ -563,6 +563,10 @@ const mkEvent = async (name, offsetDays) => {
 };
 
 // Clean slate for reminder assertions.
+// Synthetic events from PREVIOUS runs of this script also have to go: they
+// accumulate in `master_events` and, being sorted by start_time, they crowd
+// this run's events out of the 10-row "upcoming" window and fail P9-52.
+await sql("delete from master_events where code like 'p9-%'");
 await sql("delete from ustad_notifications where guest_id=$1 and category='events'", [guest]);
 await sql("delete from ustad_event_reminder_log where guest_id=$1", [guest]);
 

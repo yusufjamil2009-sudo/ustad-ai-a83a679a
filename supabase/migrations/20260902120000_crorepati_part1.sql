@@ -35,11 +35,15 @@ create table if not exists public.crorepati_rewards (
 insert into public.crorepati_rewards (event_id, question_number, coins)
 select e.id, v.qn, v.coins
 from public.crorepati_events e
+-- Authoritative 20-level ladder (Part 7 values). Kept identical to the
+-- upsert in 20260902180000_coin_economy_shop_part7.sql so that a database
+-- created from scratch seeds the correct values immediately instead of
+-- seeding stale ones and relying on the later migration to repair them.
 cross join (values
-  (1, 100), (2, 200), (3, 300), (4, 500), (5, 1000),
-  (6, 2000), (7, 3000), (8, 5000), (9, 10000), (10, 20000),
-  (11, 40000), (12, 80000), (13, 160000), (14, 320000), (15, 640000),
-  (16, 1250000), (17, 2500000), (18, 5000000), (19, 7500000), (20, 10000000)
+  (1, 10000), (2, 50000), (3, 100000), (4, 250000), (5, 500000),
+  (6, 1000000), (7, 2000000), (8, 4000000), (9, 7500000), (10, 10000000),
+  (11, 12500000), (12, 15000000), (13, 17500000), (14, 20000000), (15, 25000000),
+  (16, 30000000), (17, 40000000), (18, 50000000), (19, 75000000), (20, 100000000)
 ) as v(qn, coins)
 where e.code = 'kbc-default'
 on conflict (event_id, question_number) do nothing;
