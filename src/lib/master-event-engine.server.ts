@@ -25,6 +25,7 @@
 import { randomUUID } from "node:crypto";
 
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import { applyCoins, balanceOf } from "./wallet.server";
 import { generateQuizSet, questionHash, ladderDifficulty } from "./crorepati-ai.server";
 import type { Language } from "./router.server";
@@ -1150,13 +1151,21 @@ async function finishAttempt(attempt: Row, event: Row, outcome: string): Promise
     }
   }
 
-  await notify(
+  await notifyGuest(
     guestId,
-    isWinner ? `🏅 You won ${String(event["name"])}` : `${String(event["name"])} finished`,
-    isWinner
-      ? `${correctCount}/${Number(row["question_count"])} correct. ${reward.total} USTAD Coins added.`
-      : `${correctCount}/${Number(row["question_count"])} correct. ${reward.total} USTAD Coins added.`,
-    { kind: "master_event", eventId, attemptId, outcome },
+    isWinner ? "tournament_won" : "event_result",
+    `masterevent:${attemptId}:result`,
+    {
+      eventName: String(event["name"]),
+      score: correctCount,
+      total: Number(row["question_count"]),
+      reward: reward.total,
+    },
+    {
+      referenceType: "master_event_attempt",
+      referenceId: attemptId,
+      metadata: { eventId, attemptId, outcome, coins: reward.total },
+    },
   );
 
   await audit({

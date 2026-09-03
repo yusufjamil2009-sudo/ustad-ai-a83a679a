@@ -20,6 +20,7 @@
  */
 
 import { db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import {
   ACHIEVEMENT_LEVEL,
   ACHIEVEMENT_TITLE,
@@ -298,15 +299,33 @@ export async function awardAchievement(input: AwardInput): Promise<AwardResult> 
     achievementId,
   );
 
-  const n = NOTIFICATION[type];
-  await notify(guestId, n.title, n.body(input.eventName || input.tournament), {
-    kind: "achievement",
-    achievementType: type,
-    achievementId,
-    eventId: input.eventId,
-    matchId: input.matchId,
-    designCode: design.code,
-  });
+  /*
+   * Part 9: achievement notifications are keyed on the real achievement id,
+   * so the same award can never be announced twice, and the specific rank
+   * types get their own notification wording (spec §19).
+   */
+  const notifType =
+    type === "grandmaster"
+      ? "grandmaster"
+      : type === "ultra_grandmaster"
+        ? "ultra_grandmaster"
+        : "trophy";
+  await notifyGuest(
+    guestId,
+    notifType,
+    `achievement:${achievementId}`,
+    { achievementName: ACHIEVEMENT_TITLE[type] },
+    {
+      referenceType: "achievement",
+      referenceId: achievementId,
+      metadata: {
+        achievementType: type,
+        eventId: input.eventId,
+        matchId: input.matchId,
+        designCode: design.code,
+      },
+    },
+  );
 
   /*
    * Part 5: a verified achievement makes a certificate available. Best-effort

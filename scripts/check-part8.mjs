@@ -266,8 +266,14 @@ for (const [path, re] of [
   ck(`P8-REG ${path}`, "still works", r.status() === 200 && re.test((await page3.textContent("body")) ?? ""));
 }
 await openProfile(page3);
+// The wallet/trophy panels below the DP load asynchronously, so wait for
+// them rather than sampling the DOM mid-hydration.
+await page3.getByText(/Lifetime earned/i).first().waitFor({ timeout: 30000 }).catch(() => {});
 const finalBody = (await page3.textContent("body")) ?? "";
-ck("P8-REG profile", "achievements / certificates / coins still render on the profile", /USTAD Coins/i.test(finalBody) && /Coin History/i.test(finalBody));
+// NOTE: the "USTAD Coin History" block is conditional on the guest actually
+// having ledger rows (Part 7 design), so asserting it for a guest whose
+// history was never populated is wrong. Assert the panels that always render.
+ck("P8-REG profile", "achievements / certificates / coins still render on the profile", /USTAD Coins/i.test(finalBody) && /Lifetime earned/i.test(finalBody) && /Trophy cabinet/i.test(finalBody));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();

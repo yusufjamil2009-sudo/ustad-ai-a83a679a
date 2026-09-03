@@ -21,6 +21,7 @@ import { achievementContext } from "./trophy-engine.server";
 import { certificateContext } from "./certificate-engine.server";
 import { masterEventContext } from "./master-event-engine.server";
 import { walletContext } from "./wallet.server";
+import { notificationContext } from "./notification.server";
 import { generateImage, imagePromptFrom, wantsImageGeneration } from "./image-gen.server";
 import { userFacingAiMessage } from "./provider-errors";
 import { getProvider } from "./providers";
@@ -196,6 +197,7 @@ export async function sendMessage(input: {
 
   /* USTAD Coin wallet — the authoritative balance, never guessed */
   const walletFacts = await walletContext(guestId).catch(() => "");
+  const notificationFacts = await notificationContext(guestId).catch(() => "");
 
   const available = await usableProviders(guestId);
 
@@ -395,6 +397,7 @@ export async function sendMessage(input: {
       ...(certificateFacts ? [certificateFacts] : []),
       ...(eventFacts ? [eventFacts] : []),
       ...(walletFacts ? [walletFacts] : []),
+      ...(notificationFacts ? [notificationFacts] : []),
     ],
     goals: (goals ?? []).map((g) => g.title),
     chronoContext: chronoFacts,

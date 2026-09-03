@@ -13,6 +13,7 @@
  * state and the attempt result are ALL decided here. The client is a renderer.
  */
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import { applyCoins } from "./wallet.server";
 import { generateCrorepatiSet, questionHash } from "./crorepati-ai.server";
 import type { Language } from "./router.server";
@@ -235,20 +236,30 @@ async function endAttempt(
       coins,
       `Crorepati — ${cleared} questions cleared`,
     );
-    const title =
-      outcome.status === "won" ? "🏆 Kon Banega Crorepati" : "🏆 Kon Banega Crorepati Result";
-    const body =
-      outcome.status === "won"
-        ? `Congratulations! You cleared all ${CROREPATI_QUESTION_COUNT} questions. USTAD Coins earned: ${coins}`
-        : `You cleared ${cleared} question${cleared === 1 ? "" : "s"}. Result: ${result}. USTAD Coins earned: ${coins}`;
-    await notify(guestId, title, body, {
-      kind: "crorepati_result",
-      attemptId: attempt["id"],
-      eventId: event["id"],
-      cleared,
-      result,
-      coins,
-    });
+    // Part 9: the result notification is rendered in the user's own USTAD AI
+    // language, from the real attempt outcome. The attempt id is the dedupe
+    // key so a replayed finish cannot notify twice.
+    await notifyGuest(
+      guestId,
+      outcome.status === "won" ? "crorepati_won" : "crorepati_lost",
+      `crorepati:${String(attempt["id"])}:result`,
+      {
+        score: cleared,
+        total: CROREPATI_QUESTION_COUNT,
+        reward: coins,
+      },
+      {
+        referenceType: "crorepati_attempt",
+        referenceId: String(attempt["id"]),
+        metadata: {
+          attemptId: attempt["id"],
+          eventId: event["id"],
+          cleared,
+          result,
+          coins,
+        },
+      },
+    );
 
     // Part 4: a verified Crorepati win earns the Normal Tournament Cup.
     // Normal cups never count toward Grandmaster / Ultra Great Grandmaster.

@@ -15,6 +15,7 @@
  * USTAD Coins are virtual in-app currency: no real money, no payment provider.
  */
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import { applyCoins, balanceOf } from "./wallet.server";
 import {
   clampFreeEntries,
@@ -341,15 +342,19 @@ async function reconcileParticipation(guestId: string, event: Row, state: Row): 
     .maybeSingle();
 
   if (recovered) {
-    await notify(
+    await notifyGuest(
       guestId,
-      "🎁 Crorepati free entry restored",
-      `You missed ${cfg.missedThreshold} consecutive Crorepati events.\nYour ${cfg.freeEntriesGrant} FREE Crorepati entries have been restored.\nFree entries available: ${patch["free_entries"]}`,
+      "free_entry_restored",
+      `freeentry:restored:${String(event["id"])}`,
+      { count: Number(patch["free_entries"] ?? 0) },
       {
-        kind: "crorepati_entry_recovered",
-        eventId: event["id"],
-        freeEntries: patch["free_entries"],
-        threshold: cfg.missedThreshold,
+        referenceType: "crorepati_event",
+        referenceId: String(event["id"]),
+        metadata: {
+          eventId: event["id"],
+          freeEntries: patch["free_entries"],
+          threshold: cfg.missedThreshold,
+        },
       },
     );
   }
@@ -521,22 +526,32 @@ export async function grantEntry(input: {
     });
 
     const remaining = Number(spent["free_entries"] ?? 0);
-    await notify(
+    await notifyGuest(
       guestId,
-      "🎮 Crorepati entry used",
-      `1 FREE entry has been used.\nFree entries remaining: ${remaining}`,
-      { kind: "crorepati_entry_used", entryId: entry["id"], remaining, entryType: "free" },
+      "free_entry_used",
+      `entry:${String(entry["id"])}`,
+      { count: remaining },
+      {
+        referenceType: "crorepati_entry",
+        referenceId: String(entry["id"]),
+        metadata: { entryId: entry["id"], remaining, entryType: "free" },
+      },
     );
     if (remaining === 0 && !state["zero_notified"]) {
       await client
         .from("crorepati_entry_state")
         .update({ zero_notified: true })
         .eq("guest_id", guestId);
-      await notify(
+      await notifyGuest(
         guestId,
-        "ℹ️ Free entries finished",
-        `Your ${cfg.freeEntriesGrant} FREE Crorepati entries have been used.\nYour next eligible attempt costs ${cfg.paidEntryCoinCost.toLocaleString("en-IN")} USTAD Coins.`,
-        { kind: "crorepati_entries_exhausted", cost: cfg.paidEntryCoinCost },
+        "free_entry_used",
+        `freeentry:exhausted:${guestId}:${String(entry["id"])}`,
+        { count: 0 },
+        {
+          referenceType: "crorepati_entry",
+          referenceId: String(entry["id"]),
+          metadata: { exhausted: true, nextCost: cfg.paidEntryCoinCost },
+        },
       );
     }
 
@@ -572,12 +587,11 @@ export async function grantEntry(input: {
     })
     .eq("guest_id", guestId);
 
-  await notify(
-    guestId,
-    "🎮 Crorepati entry used",
-    `A paid entry of ${cost.toLocaleString("en-IN")} USTAD Coins has been used.\nUSTAD Coins remaining: ${after.toLocaleString("en-IN")}`,
-    { kind: "crorepati_entry_used", entryId: entry["id"], entryType: "paid_coins", cost },
-  );
+  /*
+   * No notification here on purpose: the coin debit above already raised a
+   * "Coins Spent — Crorepati Entry" notification at the wallet chokepoint.
+   * Adding one here would show the user the same fact twice.
+   */
 
   return { entryId: String(entry["id"]), entryType: "paid_coins", cost, reused: false };
 }

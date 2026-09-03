@@ -22,6 +22,7 @@
 
 import { randomBytes, createHash } from "node:crypto";
 import { db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import {
   CERTIFICATE_AWARD_LINE,
   CERTIFICATE_FOR_ACHIEVEMENT,
@@ -286,11 +287,18 @@ export async function issueForAchievement(input: {
   }
 
   await audit(certificateId, "issued", { type, achievementId }, guestId);
-  await notify(
+  // Part 9: keyed on the certificate id, so a regenerated view never
+  // produces a second notification (spec §20, §38).
+  await notifyGuest(
     guestId,
-    "🏆 Your certificate is ready!",
-    `Your ${CERTIFICATE_AWARD_LINE[type]} certificate has been generated successfully. Certificate ID: ${certificateId}`,
-    { kind: "certificate", certificateId, certificateType: type, achievementId },
+    "certificate",
+    `certificate:${certificateId}`,
+    { certificateName: CERTIFICATE_AWARD_LINE[type] },
+    {
+      referenceType: "certificate",
+      referenceId: certificateId,
+      metadata: { certificateId, certificateType: type, achievementId },
+    },
   );
 
   return { created: true, certificate: await toView(inserted as Row, input.origin) };

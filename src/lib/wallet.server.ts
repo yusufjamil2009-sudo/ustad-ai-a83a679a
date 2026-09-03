@@ -12,6 +12,7 @@
  * it cannot supply a price — prices are read from the server catalogue.
  */
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import {
   formatCoins,
   isValidCoinAmount,
@@ -133,12 +134,68 @@ export async function applyCoins(input: {
     throw new Error(error.message);
   }
   const row = (Array.isArray(data) ? data[0] : data) as Row;
-  return {
+  const result: ApplyResult = {
     transactionId: String(row["transaction_id"]),
     balanceBefore: Number(row["balance_before"] ?? 0),
     balanceAfter: Number(row["balance_after"] ?? 0),
     applied: row["applied"] === true,
   };
+
+  /*
+   * Part 9 (spec §12, §13): every real coin movement raises a notification.
+   *
+   * This sits at the single chokepoint every credit and debit already passes
+   * through, so the amount can only ever be the one the ledger actually
+   * recorded — it is never passed in from a caller or a client.
+   *
+   * `applied` is false for a replayed credit (the ledger is replay-safe), and
+   * in that case no second notification is raised. The transaction id is also
+   * the dedupe key, giving a second, independent duplicate guard.
+   */
+  if (result.applied) {
+    const credit = input.amount > 0;
+    // Shop spending gets its own richer "Item Unlocked" notification in
+    // buyItem(), so it is not duplicated as a generic "Coins Spent".
+    if (input.source !== "shop") {
+      await notifyGuest(
+        input.guestId,
+        credit ? "coins_received" : "coins_spent",
+        `coin:${result.transactionId}`,
+        {
+          amount: Math.abs(input.amount),
+          source: coinSourceLabel(input.source, input.note),
+          purpose: coinSourceLabel(input.source, input.note),
+        },
+        {
+          referenceType: "ustad_coin_ledger",
+          referenceId: result.transactionId,
+          metadata: {
+            source: input.source,
+            amount: input.amount,
+            balanceAfter: result.balanceAfter,
+          },
+        },
+      );
+    }
+  }
+
+  return result;
+}
+
+/** Human label for a ledger source, used as the notification's Source line. */
+function coinSourceLabel(source: string, note?: string): string {
+  const known: Record<string, string> = {
+    crorepati: "Crorepati Reward",
+    crorepati_entry: "Crorepati Entry",
+    mega: "Mega Tournament",
+    mega_pass: "Mega Pass",
+    master_event: "Event Reward",
+    trophy: "Trophy Reward",
+    certificate: "Certificate",
+    shop: "USTAD Shop",
+    admin: "USTAD AI",
+  };
+  return known[source] ?? note ?? "USTAD AI";
 }
 
 /* ------------------------------------------------------------------ */
@@ -305,12 +362,41 @@ export async function buyItem(input: { token: unknown; itemId: string }): Promis
   const wallet = await getWallet(guestId);
 
   if (!alreadyOwned) {
-    await notify(
+    // Part 9: notify ONLY after the coin deduction and the ownership record
+    // both succeeded — a failed purchase raises no success notification
+    // (spec §15). The purchase id is the idempotency key, so a double-click
+    // or a retried request cannot produce two notifications (spec §38).
+    const purchaseId = String(row["purchase_id"]);
+    const pricePaid = Number(row["price_paid"] ?? 0);
+    const isMegaPass = /mega.*pass/i.test(String(item["name"])) || itemId === "mega_pass";
+
+    await notifyGuest(
       guestId,
-      "🛒 Purchase complete",
-      `You bought ${String(item["name"])} for ${formatCoins(Number(row["price_paid"] ?? 0))}.\nBalance: ${formatCoins(wallet.balance)}.`,
-      { kind: "shop_purchase", itemId, price: Number(row["price_paid"] ?? 0) },
+      isMegaPass ? "mega_pass" : "shop_purchase",
+      `purchase:${purchaseId}`,
+      { itemName: String(item["name"]), amount: pricePaid },
+      {
+        referenceType: "ustad_purchase",
+        referenceId: purchaseId,
+        metadata: { itemId, price: pricePaid, balanceAfter: wallet.balance },
+      },
     );
+
+    // A purchased item that grants a capability is also a feature unlock
+    // (spec §16), reported from the real ownership record.
+    if (String(item["category"]) === "feature_unlocks") {
+      await notifyGuest(
+        guestId,
+        "feature_unlock",
+        `feature:${purchaseId}`,
+        { featureName: String(item["name"]) },
+        {
+          referenceType: "ustad_purchase",
+          referenceId: purchaseId,
+          metadata: { itemId },
+        },
+      );
+    }
   }
 
   return {

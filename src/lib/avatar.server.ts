@@ -13,6 +13,7 @@
  * so Guest A can never read, overwrite or delete Guest B's picture.
  */
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import {
   ALLOWED_GALLERY_MIME,
   galleryFileError,
@@ -283,9 +284,16 @@ export async function uploadAvatar(input: {
   // Only now is the old picture safe to discard.
   if (previousRef && previousRef !== ref) await removeStorageObject(previousRef);
 
-  await notify(guestId, "🖼️ Profile picture updated", "Your new profile picture is now live.", {
-    kind: "avatar_updated",
-  });
+  // Part 9 (spec §21): one notification per successful DP change, in the
+  // user's own language. Keyed on the new storage ref so a retried upload of
+  // the same picture does not notify twice.
+  await notifyGuest(
+    guestId,
+    "profile_updated",
+    `avatar:${ref}`,
+    {},
+    { referenceType: "profile_avatar", referenceId: ref, metadata: { ref } },
+  );
 
   return getAvatar(input.token);
 }

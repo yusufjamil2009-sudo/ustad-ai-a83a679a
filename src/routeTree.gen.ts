@@ -23,6 +23,7 @@ import { Route as StudyRouteImport } from './routes/study'
 import { Route as ExamsIndexRouteImport } from './routes/exams.index'
 import { Route as ExamsExamIdRouteImport } from './routes/exams.$examId'
 import { Route as ApiPublicExamSchedulerRouteImport } from './routes/api/public/exam-scheduler'
+import { Route as ApiPublicNotificationSchedulerRouteImport } from './routes/api/public/notification-scheduler'
 import { Route as GalleryShareTokenRouteImport } from './routes/gallery.share.$token'
 import { Route as VerifyCertificateVtokenRouteImport } from './routes/verify.certificate.$vtoken'
 
@@ -96,6 +97,12 @@ const ApiPublicExamSchedulerRoute = ApiPublicExamSchedulerRouteImport.update({
   path: '/api/public/exam-scheduler',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicNotificationSchedulerRoute =
+  ApiPublicNotificationSchedulerRouteImport.update({
+    id: '/api/public/notification-scheduler',
+    path: '/api/public/notification-scheduler',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const GalleryShareTokenRoute = GalleryShareTokenRouteImport.update({
   id: '/gallery/share/$token',
   path: '/gallery/share/$token',
@@ -122,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams/': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/api/public/notification-scheduler': typeof ApiPublicNotificationSchedulerRoute
   '/gallery/share/$token': typeof GalleryShareTokenRoute
   '/verify/certificate/$vtoken': typeof VerifyCertificateVtokenRoute
 }
@@ -140,6 +148,7 @@ export interface FileRoutesByTo {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/api/public/notification-scheduler': typeof ApiPublicNotificationSchedulerRoute
   '/gallery/share/$token': typeof GalleryShareTokenRoute
   '/verify/certificate/$vtoken': typeof VerifyCertificateVtokenRoute
 }
@@ -159,6 +168,7 @@ export interface FileRoutesById {
   '/exams/$examId': typeof ExamsExamIdRoute
   '/exams/': typeof ExamsIndexRoute
   '/api/public/exam-scheduler': typeof ApiPublicExamSchedulerRoute
+  '/api/public/notification-scheduler': typeof ApiPublicNotificationSchedulerRoute
   '/gallery/share/$token': typeof GalleryShareTokenRoute
   '/verify/certificate/$vtoken': typeof VerifyCertificateVtokenRoute
 }
@@ -179,6 +189,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams/'
     | '/api/public/exam-scheduler'
+    | '/api/public/notification-scheduler'
     | '/gallery/share/$token'
     | '/verify/certificate/$vtoken'
   fileRoutesByTo: FileRoutesByTo
@@ -197,6 +208,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams'
     | '/api/public/exam-scheduler'
+    | '/api/public/notification-scheduler'
     | '/gallery/share/$token'
     | '/verify/certificate/$vtoken'
   id:
@@ -215,6 +227,7 @@ export interface FileRouteTypes {
     | '/exams/$examId'
     | '/exams/'
     | '/api/public/exam-scheduler'
+    | '/api/public/notification-scheduler'
     | '/gallery/share/$token'
     | '/verify/certificate/$vtoken'
   fileRoutesById: FileRoutesById
@@ -234,6 +247,7 @@ export interface RootRouteChildren {
   ExamsExamIdRoute: typeof ExamsExamIdRoute
   ExamsIndexRoute: typeof ExamsIndexRoute
   ApiPublicExamSchedulerRoute: typeof ApiPublicExamSchedulerRoute
+  ApiPublicNotificationSchedulerRoute: typeof ApiPublicNotificationSchedulerRoute
   GalleryShareTokenRoute: typeof GalleryShareTokenRoute
   VerifyCertificateVtokenRoute: typeof VerifyCertificateVtokenRoute
 }
@@ -338,6 +352,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicExamSchedulerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/notification-scheduler': {
+      id: '/api/public/notification-scheduler'
+      path: '/api/public/notification-scheduler'
+      fullPath: '/api/public/notification-scheduler'
+      preLoaderRoute: typeof ApiPublicNotificationSchedulerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/gallery/share/$token': {
       id: '/gallery/share/$token'
       path: '/gallery/share/$token'
@@ -370,6 +391,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExamsExamIdRoute: ExamsExamIdRoute,
   ExamsIndexRoute: ExamsIndexRoute,
   ApiPublicExamSchedulerRoute: ApiPublicExamSchedulerRoute,
+  ApiPublicNotificationSchedulerRoute: ApiPublicNotificationSchedulerRoute,
   GalleryShareTokenRoute: GalleryShareTokenRoute,
   VerifyCertificateVtokenRoute: VerifyCertificateVtokenRoute,
 }

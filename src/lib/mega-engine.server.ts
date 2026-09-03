@@ -15,6 +15,7 @@
  * match completion are all decided here.
  */
 import { requireGuest, db } from "./guest.server";
+import { notifyGuest } from "./notification.server";
 import { applyCoins, balanceOf } from "./wallet.server";
 import { generateQuizSet, questionHash } from "./crorepati-ai.server";
 import type { Language } from "./router.server";
@@ -209,11 +210,18 @@ export async function buyPass(token: unknown) {
 
   // The debit is keyed by the pass id, so it can never be applied twice.
   await ledger(guestId, "mega_pass", String(created["id"]), -cost, "Mega Tournament weekly pass");
-  await notify(
+  // Part 9 (spec §14): raised only after the debit and the pass row both
+  // succeeded, keyed on the pass id so a retry cannot notify twice.
+  await notifyGuest(
     guestId,
-    "🎫 Mega Tournament Pass",
-    `Your weekly Mega Tournament pass is active. Play unlimited matches until the event closes.`,
-    { kind: "mega_pass", eventId: event["id"], passId: created["id"], cost },
+    "mega_pass",
+    `megapass:${String(created["id"])}`,
+    { amount: cost },
+    {
+      referenceType: "mega_pass",
+      referenceId: String(created["id"]),
+      metadata: { eventId: event["id"], passId: created["id"], cost },
+    },
   );
 
   return {
@@ -1412,20 +1420,30 @@ async function completeMatch(match: Row, event: Row): Promise<Row> {
       `Mega Tournament ${solo ? "single player" : `rank #${s.rank}`}`,
     );
 
-    const title = s.isWinner ? "🏆 Mega Tournament Victory!" : "🏟️ Mega Tournament Result";
-    const body = s.isWinner
-      ? `Congratulations! You won the Mega Tournament match.\nCorrect Answers: ${s.correctCount}\nFinal Rank: #1`
-      : `You finished at Rank #${s.rank}.\nCorrect Answers: ${s.correctCount}`;
-    await notify(s.guestId, title, body, {
-      kind: "mega_result",
-      matchId,
-      eventId: String(match["event_id"]),
-      mode: match["mode"],
-      rank: s.rank,
-      correct: s.correctCount,
-      outcome: solo ? outcome : s.isWinner ? "WIN" : "LOSS",
-      coins: s.coinsAwarded,
-    });
+    // Part 9: the match result in the player's own language.
+    await notifyGuest(
+      s.guestId,
+      s.isWinner ? "tournament_won" : "tournament_lost",
+      `mega:${matchId}:${s.guestId}:result`,
+      {
+        eventName: "Mega Tournament",
+        reward: s.coinsAwarded,
+        score: s.correctCount,
+      },
+      {
+        referenceType: "mega_match",
+        referenceId: matchId,
+        metadata: {
+          matchId,
+          eventId: String(match["event_id"]),
+          mode: match["mode"],
+          rank: s.rank,
+          correct: s.correctCount,
+          outcome: solo ? outcome : s.isWinner ? "WIN" : "LOSS",
+          coins: s.coinsAwarded,
+        },
+      },
+    );
 
     // Part 4: verified winner → Mega Cup → Grandmaster / Ultra recalculation.
     // Idempotent and best-effort: it re-reads mega_player_results itself and
