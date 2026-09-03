@@ -221,3 +221,41 @@
 @utility typing-dot {
   animation: ustad-pulse 1.1s ease-in-out infinite;
 }
+
+/* ---------- Kon Banega Crorepati (Part 1) ---------- */
+@keyframes kbc-question-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes kbc-option-in {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@utility kbc-question-anim {
+  animation: kbc-question-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@utility kbc-option-anim {
+  animation: kbc-option-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kbc-question-anim,
+  .kbc-option-anim {
+    animation-duration: 0.01ms;
+  }
+}

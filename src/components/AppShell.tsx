@@ -9,6 +9,10 @@ import {
   Boxes,
   Settings,
   ClipboardList,
+  Trophy,
+  Swords,
+  CalendarClock,
+  ShoppingCart,
 } from "lucide-react";
 import { useGuest, shortId } from "@/lib/ustad-client";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
@@ -18,6 +22,10 @@ const NAV = [
   { to: "/", label: "Chat", icon: MessageSquare },
   { to: "/study", label: "Study", icon: GraduationCap },
   { to: "/exams", label: "Exams", icon: ClipboardList },
+  { to: "/crorepati", label: "Crorepati", icon: Trophy },
+  { to: "/mega", label: "Mega", icon: Swords },
+  { to: "/events", label: "Events", icon: CalendarClock },
+  { to: "/shop", label: "USTAD Shop", icon: ShoppingCart },
   { to: "/notes", label: "Notes", icon: NotebookPen },
   { to: "/memory", label: "Memory", icon: Brain },
   { to: "/reminders", label: "Reminders", icon: BellRing },
