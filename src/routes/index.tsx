@@ -394,7 +394,7 @@ function ChatPage() {
 
   return (
     <AppShell>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         {/* conversation history */}
         <div
           className={`${showList ? "flex" : "hidden"} absolute inset-0 z-20 flex-col bg-background p-3 lg:static lg:z-0 lg:flex lg:w-64 lg:border-r lg:border-border`}
@@ -465,9 +465,9 @@ function ChatPage() {
         </div>
 
         {/* chat area */}
-        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 md:px-4">
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <Button
                 variant="ghost"
                 size="sm"
@@ -480,7 +480,15 @@ function ChatPage() {
                 <Plus className="mr-1 size-4" /> New chat
               </Button>
             </div>
-            <p className="truncate text-xs text-muted-foreground">
+            {/*
+             * min-w-0 is what makes `truncate` actually able to truncate here.
+             * A flex item's default min-width:auto refuses to shrink below its
+             * content width, and this line is nowrap, so once the status grows
+             * from "USTAD AI is ready." to "<provider> · <model> · <intent>" it
+             * forced the header — and with it the whole page — wider than the
+             * mobile viewport.
+             */}
+            <p className="min-w-0 truncate text-xs text-muted-foreground">
               {status || "USTAD AI is ready."}
             </p>
           </div>

@@ -83,6 +83,25 @@ export async function deleteConversation(token: unknown, id: string) {
   return { ok: true };
 }
 
+/**
+ * Read a message's `attachments` as an array, whatever jsonb actually holds.
+ *
+ * The `messages.attachments` column defaults to `'{}'::jsonb`, which decodes to
+ * an empty OBJECT, not an empty array. Rows written without attachments (every
+ * assistant reply) therefore carry `{}`, and `?? []` does not catch it because
+ * `{}` is not null. Iterating it threw "object is not iterable" and the whole
+ * message list failed to load after the first exchange.
+ */
+function attachmentsOf(row: { attachments?: unknown }): Array<{
+  id?: string;
+  name?: string;
+  mime?: string;
+  kind?: string;
+}> {
+  const value = row.attachments;
+  return Array.isArray(value) ? value : [];
+}
+
 export async function listMessages(token: unknown, conversationId: string) {
   const guestId = await requireGuest(token);
   const { data, error } = await db()
@@ -97,7 +116,7 @@ export async function listMessages(token: unknown, conversationId: string) {
   // a refresh. Message JSON only stores ids; the bytes live in attachments.
   const ids: string[] = [];
   for (const row of rows) {
-    for (const a of (row.attachments as Array<{ id?: string }>) ?? []) {
+    for (const a of attachmentsOf(row)) {
       if (a?.id) ids.push(a.id);
     }
   }
@@ -110,9 +129,7 @@ export async function listMessages(token: unknown, conversationId: string) {
   const byId = new Map((files ?? []).map((f) => [f.id, f]));
   return Promise.all(
     rows.map(async (row) => {
-      const atts =
-        (row.attachments as Array<{ id?: string; name?: string; mime?: string; kind?: string }>) ??
-        [];
+      const atts = attachmentsOf(row);
       if (!atts.length) return row;
       const hydrated = await Promise.all(
         atts.map(async (a) => {
