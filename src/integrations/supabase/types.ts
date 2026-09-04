@@ -1846,6 +1846,422 @@ export type Database = {
           },
         ]
       }
+      master_event_attempt_questions: {
+        Row: {
+          answered_at: string | null
+          answered_index: number | null
+          attempt_id: string
+          category: string
+          correct_index: number
+          difficulty: string
+          explanation: string
+          hint: string
+          options: Json
+          question: string
+          question_number: number
+          was_correct: boolean | null
+        }
+        Insert: {
+          answered_at?: string | null
+          answered_index?: number | null
+          attempt_id: string
+          category?: string
+          correct_index: number
+          difficulty?: string
+          explanation?: string
+          hint?: string
+          options: Json
+          question: string
+          question_number: number
+          was_correct?: boolean | null
+        }
+        Update: {
+          answered_at?: string | null
+          answered_index?: number | null
+          attempt_id?: string
+          category?: string
+          correct_index?: number
+          difficulty?: string
+          explanation?: string
+          hint?: string
+          options?: Json
+          question?: string
+          question_number?: number
+          was_correct?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_event_attempt_questions_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "master_event_attempts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_event_attempts: {
+        Row: {
+          answer_timer_starts_at: string | null
+          cleared_questions: number
+          coin_reward: number
+          correct_count: number
+          created_at: string
+          current_question: number
+          deadline_at: string | null
+          ended_at: string | null
+          event_id: string
+          game_state: string
+          guest_id: string
+          id: string
+          idempotency_key: string | null
+          lifelines_used: Json
+          question_count: number
+          result: string
+          score: number
+          started_at: string
+          status: string
+          total_deadline_at: string | null
+          wrong_count: number
+        }
+        Insert: {
+          answer_timer_starts_at?: string | null
+          cleared_questions?: number
+          coin_reward?: number
+          correct_count?: number
+          created_at?: string
+          current_question?: number
+          deadline_at?: string | null
+          ended_at?: string | null
+          event_id: string
+          game_state?: string
+          guest_id: string
+          id?: string
+          idempotency_key?: string | null
+          lifelines_used?: Json
+          question_count: number
+          result?: string
+          score?: number
+          started_at?: string
+          status?: string
+          total_deadline_at?: string | null
+          wrong_count?: number
+        }
+        Update: {
+          answer_timer_starts_at?: string | null
+          cleared_questions?: number
+          coin_reward?: number
+          correct_count?: number
+          created_at?: string
+          current_question?: number
+          deadline_at?: string | null
+          ended_at?: string | null
+          event_id?: string
+          game_state?: string
+          guest_id?: string
+          id?: string
+          idempotency_key?: string | null
+          lifelines_used?: Json
+          question_count?: number
+          result?: string
+          score?: number
+          started_at?: string
+          status?: string
+          total_deadline_at?: string | null
+          wrong_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_event_attempts_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "master_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "master_event_attempts_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_event_audit: {
+        Row: {
+          action: string
+          created_at: string
+          detail: Json
+          engine_version: string
+          event_id: string | null
+          from_status: string
+          guest_id: string | null
+          id: string
+          reason: string
+          to_status: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          event_id?: string | null
+          from_status?: string
+          guest_id?: string | null
+          id?: string
+          reason?: string
+          to_status?: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          detail?: Json
+          engine_version?: string
+          event_id?: string | null
+          from_status?: string
+          guest_id?: string | null
+          id?: string
+          reason?: string
+          to_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_event_audit_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "master_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_event_results: {
+        Row: {
+          attempt_id: string | null
+          coins_awarded: number
+          correct_count: number
+          created_at: string
+          duration_ms: number
+          event_id: string
+          guest_id: string
+          id: string
+          is_winner: boolean
+          outcome: string
+          rank: number
+          score: number
+          source_ref: string
+        }
+        Insert: {
+          attempt_id?: string | null
+          coins_awarded?: number
+          correct_count?: number
+          created_at?: string
+          duration_ms?: number
+          event_id: string
+          guest_id: string
+          id?: string
+          is_winner?: boolean
+          outcome?: string
+          rank?: number
+          score?: number
+          source_ref?: string
+        }
+        Update: {
+          attempt_id?: string | null
+          coins_awarded?: number
+          correct_count?: number
+          created_at?: string
+          duration_ms?: number
+          event_id?: string
+          guest_id?: string
+          id?: string
+          is_winner?: boolean
+          outcome?: string
+          rank?: number
+          score?: number
+          source_ref?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_event_results_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "master_event_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "master_event_results_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "master_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "master_event_results_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_event_served_questions: {
+        Row: {
+          created_at: string
+          event_id: string
+          guest_id: string
+          question: string
+          question_hash: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          guest_id: string
+          question?: string
+          question_hash: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          guest_id?: string
+          question?: string
+          question_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_event_served_questions_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "master_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "master_event_served_questions_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_events: {
+        Row: {
+          achievement_config: Json
+          answer_timer_seconds: number
+          cancel_reason: string
+          cancelled_at: string | null
+          category: string
+          certificate_config: Json
+          code: string
+          created_at: string
+          created_by: string
+          description: string
+          difficulty: string
+          end_time: string | null
+          entry_config: Json
+          event_type: string
+          finalized_at: string | null
+          gameplay_config: Json
+          id: string
+          language: string
+          leaderboard_enabled: boolean
+          lifeline_config: Json
+          max_players: number
+          min_players: number
+          multiplayer_enabled: boolean
+          name: string
+          pre_timer_seconds: number
+          published_at: string | null
+          question_count: number
+          question_source: string
+          required_correct: number
+          reward_config: Json
+          source_event_id: string | null
+          source_table: string
+          start_time: string | null
+          status: string
+          timezone: string
+          total_timer_seconds: number
+          updated_at: string
+        }
+        Insert: {
+          achievement_config?: Json
+          answer_timer_seconds?: number
+          cancel_reason?: string
+          cancelled_at?: string | null
+          category?: string
+          certificate_config?: Json
+          code: string
+          created_at?: string
+          created_by?: string
+          description?: string
+          difficulty?: string
+          end_time?: string | null
+          entry_config?: Json
+          event_type: string
+          finalized_at?: string | null
+          gameplay_config?: Json
+          id?: string
+          language?: string
+          leaderboard_enabled?: boolean
+          lifeline_config?: Json
+          max_players?: number
+          min_players?: number
+          multiplayer_enabled?: boolean
+          name: string
+          pre_timer_seconds?: number
+          published_at?: string | null
+          question_count: number
+          question_source?: string
+          required_correct?: number
+          reward_config?: Json
+          source_event_id?: string | null
+          source_table?: string
+          start_time?: string | null
+          status?: string
+          timezone?: string
+          total_timer_seconds?: number
+          updated_at?: string
+        }
+        Update: {
+          achievement_config?: Json
+          answer_timer_seconds?: number
+          cancel_reason?: string
+          cancelled_at?: string | null
+          category?: string
+          certificate_config?: Json
+          code?: string
+          created_at?: string
+          created_by?: string
+          description?: string
+          difficulty?: string
+          end_time?: string | null
+          entry_config?: Json
+          event_type?: string
+          finalized_at?: string | null
+          gameplay_config?: Json
+          id?: string
+          language?: string
+          leaderboard_enabled?: boolean
+          lifeline_config?: Json
+          max_players?: number
+          min_players?: number
+          multiplayer_enabled?: boolean
+          name?: string
+          pre_timer_seconds?: number
+          published_at?: string | null
+          question_count?: number
+          question_source?: string
+          required_correct?: number
+          reward_config?: Json
+          source_event_id?: string | null
+          source_table?: string
+          start_time?: string | null
+          status?: string
+          timezone?: string
+          total_timer_seconds?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       mega_events: {
         Row: {
           category: string
